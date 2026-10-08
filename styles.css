@@ -1,0 +1,376 @@
+:root {
+  --bg: #f6f4f1;
+  --surface: #ffffff;
+  --text: #1f1d1a;
+  --muted: #6d6860;
+  --border: #e3ded6;
+  --primary: #b5651d;
+  --primary-dark: #8f4f16;
+  --ok: #2e7d4f;
+  --ok-bg: #e3f3e9;
+  --warn: #9a6a00;
+  --warn-bg: #fdf3d7;
+  --bad: #b23a3a;
+  --bad-bg: #f9e3e3;
+  --neutral-bg: #eeebe6;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.hidden { display: none !important; }
+
+.container { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+
+/* Barra superior */
+.topbar {
+  background: #1f1d1a;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  flex-wrap: wrap;
+}
+.topbar .brand { font-weight: 700; margin-right: auto; }
+.topbar a, .topbar button.link {
+  color: #e9e3da;
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: none;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+  position: relative;
+}
+.topbar a.active, .topbar a:hover, .topbar button.link:hover { background: #3a3631; color: #fff; }
+.badge {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 5px;
+  margin-left: 4px;
+  border-radius: 9px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 12px;
+  text-align: center;
+}
+
+/* Blocos */
+h1 { font-size: 26px; margin: 0 0 4px; }
+h2 { font-size: 19px; margin: 28px 0 12px; }
+.sub { color: var(--muted); margin: 0 0 20px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.stack > * + * { margin-top: 12px; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+
+/* Formulários */
+label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+input, select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+}
+input:focus, select:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+.field + .field { margin-top: 12px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row > .grow { flex: 1; min-width: 140px; }
+
+.btn {
+  display: inline-block;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: var(--primary);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn:hover { background: var(--primary-dark); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.secondary { background: #fff; color: var(--text); border-color: var(--border); }
+.btn.secondary:hover { background: var(--neutral-bg); }
+.btn.ok { background: var(--ok); }
+.btn.bad { background: var(--bad); }
+.btn.small { padding: 6px 10px; font-size: 14px; }
+.btn.block { width: 100%; }
+
+.error { color: var(--bad); font-size: 14px; margin-top: 8px; min-height: 1em; }
+
+/* Login */
+.auth { max-width: 380px; margin: 48px auto; }
+.auth h1 { text-align: center; }
+.auth .sub { text-align: center; }
+.hint { font-size: 13px; color: var(--muted); background: var(--neutral-bg); padding: 10px; border-radius: 8px; }
+
+/* Opções selecionáveis (serviço, profissional, dia, horário) */
+.choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.choice {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.choice small { display: block; color: var(--muted); }
+.choice:hover:not(:disabled) { border-color: var(--primary); }
+.choice.selected { border-color: var(--primary); background: #fbefe3; box-shadow: inset 0 0 0 1px var(--primary); }
+.choice:disabled { cursor: not-allowed; }
+.choice.busy { background: var(--bad-bg); color: var(--bad); border-color: #efc9c9; }
+.choice.past { background: var(--neutral-bg); color: #a39d94; }
+.slot { min-width: 82px; text-align: center; }
+
+.legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); margin-top: 8px; flex-wrap: wrap; }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; border: 1px solid var(--border); }
+.legend .l-free::before { background: #fff; }
+.legend .l-busy::before { background: var(--bad-bg); }
+.legend .l-past::before { background: var(--neutral-bg); }
+
+.summary { background: #fff8f0; border-color: #f0d9bf; }
+
+/* Agendamentos */
+.appt { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.appt .info { flex: 1; min-width: 200px; }
+.appt .info strong { display: block; }
+.appt .meta { color: var(--muted); font-size: 14px; }
+.status { font-size: 13px; font-weight: 600; padding: 3px 9px; border-radius: 12px; white-space: nowrap; }
+.st-pending { background: var(--warn-bg); color: var(--warn); }
+.st-confirmed { background: var(--ok-bg); color: var(--ok); }
+.st-rejected { background: var(--bad-bg); color: var(--bad); }
+.st-cancelled { background: var(--neutral-bg); color: var(--muted); }
+.st-paid { background: #e2ecf8; color: #2a5a8f; }
+
+.empty { color: var(--muted); text-align: center; padding: 24px; }
+
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+.table th { font-size: 13px; color: var(--muted); font-weight: 600; }
+
+/* Notificações (toast) */
+.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 10; max-width: calc(100% - 32px); }
+.toast {
+  background: #1f1d1a;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.2);
+  max-width: 340px;
+  animation: slide .2s ease-out;
+}
+.toast.alert { background: var(--primary); }
+@keyframes slide { from { transform: translateY(10px); opacity: 0; } }
+
+@media (max-width: 560px) {
+  h1 { font-size: 22px; }
+  .appt .actions { width: 100%; }
+}
+
+/* Identidade da Barbearia do Caio */
+:root {
+  --bg: #15120d;
+  --surface: rgba(22, 19, 14, .93);
+  --text: #f7f1e4;
+  --muted: #d0c5af;
+  --border: #665638;
+  --primary: #d4af37;
+  --primary-dark: #b9972d;
+  --neutral-bg: #30291e;
+}
+body {
+  min-height: 100vh;
+  background: #15120d;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(rgba(10, 9, 6, .35), rgba(10, 9, 6, .78)), url("caio.jpeg") center 30% / cover no-repeat;
+}
+h1, h2, .brand {
+  font-family: "Copperplate Gothic Bold", "Copperplate Gothic", Copperplate, "Palatino Linotype", serif;
+  color: var(--primary);
+}
+a { color: #e7c65c; }
+.topbar { background: rgba(15, 13, 9, .95); border-bottom: 1px solid var(--border); }
+.topbar a.active, .topbar a:hover, .topbar button.link:hover { background: #51421e; color: #ffe69c; }
+.auth { margin: 36vh auto 24px; }
+.auth h1 { font-size: clamp(1.65rem, 7vw, 2.1rem); text-shadow: 0 2px 12px #000; }
+.auth .sub { color: #fff3d6; text-shadow: 0 1px 6px #000; }
+.card { box-shadow: 0 10px 30px rgba(0, 0, 0, .22); }
+input, select { background: #211c14; color: var(--text); }
+.btn, .btn.ok, .btn.bad { background: var(--primary); color: #201907; }
+.btn:hover, .btn.ok:hover, .btn.bad:hover { background: #e5c65d; }
+.btn.secondary { background: #211c14; color: #e7c65c; }
+.badge { color: #201907; }
+.choice { background: #211c14; color: var(--text); }
+.choice.selected { background: #51421e; color: #ffe69c; }
+.choice.selected small { color: #f4deb0; }
+.choice.past { color: #b9ae99; }
+.summary { background: rgba(55, 43, 18, .95); border-color: var(--primary); }
+.legend .l-free::before { background: #211c14; }
+.toast.alert { color: #201907; }
+.table { overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .container { padding: 20px 16px 40px; }
+  .topbar .brand { width: 100%; font-size: 1.1rem; }
+  .topbar a, .topbar button.link { padding: 8px; font-size: .875rem; }
+  .auth { margin-top: 34vh; }
+  .card { padding: 16px; }
+}
+
+/* =========================================================
+   Animações
+   ========================================================= */
+
+/* Foto de fundo com zoom bem lento (efeito "cinema") */
+body::before { animation: zoom-fundo 28s ease-in-out infinite alternate; }
+@keyframes zoom-fundo {
+  from { transform: scale(1); }
+  to   { transform: scale(1.08); }
+}
+
+/* Barra superior desce ao entrar */
+.topbar { animation: descer .5s ease-out both; position: sticky; top: 0; z-index: 5; backdrop-filter: blur(6px); }
+@keyframes descer { from { transform: translateY(-100%); opacity: 0; } }
+
+/* Linha dourada embaixo dos links do menu */
+.topbar a::after {
+  content: "";
+  position: absolute;
+  left: 10px; right: 10px; bottom: 2px;
+  height: 2px;
+  background: var(--primary);
+  transform: scaleX(0);
+  transition: transform .25s ease;
+}
+.topbar a:hover::after, .topbar a.active::after { transform: scaleX(1); }
+.topbar a, .topbar button.link { transition: background .2s, color .2s; }
+
+/* Contador de pedidos pulsando */
+.badge { animation: pulsar 1.8s ease-in-out infinite; }
+@keyframes pulsar {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 175, 55, .7); }
+  50%      { box-shadow: 0 0 0 6px rgba(212, 175, 55, 0); }
+}
+
+/* Entrada da página: os blocos sobem um depois do outro */
+#app.entrando > *,
+#app.entrando .stack > *,
+#app.entrando .grid > * { animation: subir .55s cubic-bezier(.2, .8, .2, 1) both; }
+#app.entrando > *:nth-child(2) { animation-delay: .06s; }
+#app.entrando > *:nth-child(3) { animation-delay: .12s; }
+#app.entrando > *:nth-child(4) { animation-delay: .18s; }
+#app.entrando > *:nth-child(5) { animation-delay: .24s; }
+#app.entrando > *:nth-child(6) { animation-delay: .30s; }
+#app.entrando > *:nth-child(n+7) { animation-delay: .36s; }
+#app.entrando .stack > *:nth-child(2), #app.entrando .grid > *:nth-child(2) { animation-delay: .25s; }
+#app.entrando .stack > *:nth-child(3), #app.entrando .grid > *:nth-child(3) { animation-delay: .32s; }
+#app.entrando .stack > *:nth-child(4), #app.entrando .grid > *:nth-child(4) { animation-delay: .39s; }
+#app.entrando .stack > *:nth-child(n+5), #app.entrando .grid > *:nth-child(n+5) { animation-delay: .46s; }
+@keyframes subir { from { opacity: 0; transform: translateY(18px); } }
+
+/* Login: título com brilho dourado passando */
+.auth h1 {
+  background: linear-gradient(100deg, #b9972d 20%, #fff3c4 45%, #d4af37 55%, #b9972d 80%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 2px 8px #000);
+  animation: brilho 4s linear infinite;
+}
+@keyframes brilho { from { background-position: 150% 0; } to { background-position: -100% 0; } }
+.auth .card { animation: aparecer .7s .15s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes aparecer { from { opacity: 0; transform: translateY(24px) scale(.97); } }
+
+/* Cartões levantam ao passar o mouse */
+.card { transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease; }
+.grid > .card:hover, .appt:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, .4);
+  border-color: var(--primary);
+}
+
+/* Botões: levantam, afundam no clique e têm um reflexo que passa */
+.btn {
+  position: relative;
+  overflow: hidden;
+  transition: transform .15s ease, box-shadow .2s ease, background .2s ease;
+}
+.btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(212, 175, 55, .35); }
+.btn:active:not(:disabled) { transform: translateY(0) scale(.97); box-shadow: none; }
+.btn::after {
+  content: "";
+  position: absolute;
+  top: 0; left: -75%;
+  width: 50%; height: 100%;
+  background: linear-gradient(120deg, transparent, rgba(255, 255, 255, .55), transparent);
+  transform: skewX(-20deg);
+}
+.btn:hover:not(:disabled)::after { animation: reflexo .7s ease; }
+@keyframes reflexo { to { left: 130%; } }
+
+/* Opções (serviço, profissional, dia, horário) */
+.choice { transition: transform .15s ease, border-color .2s, background .2s, box-shadow .2s; }
+.choice:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 6px 16px rgba(0, 0, 0, .35); }
+.choice:active:not(:disabled) { transform: scale(.95); }
+.choice.selected { animation: escolher .35s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes escolher { 0% { transform: scale(.9); } 100% { transform: scale(1); } }
+
+/* Campos de texto brilham ao focar */
+input, select { transition: box-shadow .2s, border-color .2s; }
+input:focus, select:focus { box-shadow: 0 0 0 4px rgba(212, 175, 55, .2); }
+
+/* Status "Aguardando confirmação" com bolinha piscando */
+.st-pending::before {
+  content: "";
+  display: inline-block;
+  width: 7px; height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+  animation: piscar 1.2s ease-in-out infinite;
+}
+@keyframes piscar { 50% { opacity: .2; } }
+
+/* Avisos (toast) entram deslizando da direita com um quique */
+.toast { animation: entrar-toast .5s cubic-bezier(.3, 1.4, .5, 1); }
+@keyframes entrar-toast { from { opacity: 0; transform: translateX(120%); } }
+
+/* Mensagem de erro balança */
+.error:not(:empty) { animation: balancar .4s; }
+@keyframes balancar {
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+/* Quem pede "menos movimento" no sistema não vê o zoom do fundo
+   (é o único movimento grande e contínuo da tela) */
+@media (prefers-reduced-motion: reduce) {
+  body::before { animation: none; }
+}

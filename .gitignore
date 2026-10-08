@@ -1,0 +1,7 @@
+.env
+.env.*
+!.env.example
+node_modules/
+pedido-corte.png
+.DS_Store
+Thumbs.db
