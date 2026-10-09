@@ -1,14 +1,11 @@
 /* =========================================================
-   Barbearia — protótipo de agendamento
-   Os dados ficam no localStorage do navegador (banco "falso").
-   O login fica no sessionStorage, então cada aba pode ter um
-   usuário diferente (ex.: cliente numa aba, ADM na outra).
+   Barbearia do Caio — agendamento
+   Os dados ficam no Supabase (banco de dados online), então
+   clientes e ADM veem a mesma agenda em qualquer aparelho.
+   As regras de segurança estão em supabase/schema.sql.
    ========================================================= */
 
-const DB_KEY = 'barbearia_db_v1';
-const SESSION_KEY = 'barbearia_sessao';
-
-// Funcionamento da barbearia
+// Funcionamento da barbearia (o banco confere as mesmas regras)
 const HORARIO = { abre: '09:00', fecha: '19:00', intervalo: 30, diasFechados: [0] }; // 0 = domingo
 const DIAS_PARA_AGENDAR = 14;
 
@@ -21,99 +18,106 @@ const STATUS = {
 // Pedidos que "ocupam" o horário na agenda
 const ATIVOS = ['pending', 'confirmed'];
 
-/* ---------------- Banco de dados ---------------- */
+/* ---------------- Conexão com o Supabase ---------------- */
 
-const CATALOGO_VERSAO = 2;
-function catalogoServicos() {
-  return [
-    { id: 'caio-corte', name: 'Corte', duration: 60, price: 40, active: true },
-    { id: 'caio-penteado', name: 'Penteado', duration: 60, price: 20, active: true },
-    { id: 'caio-sobrancelha', name: 'Sobrancelha', duration: 30, price: 15, active: true },
-    { id: 'caio-barba', name: 'Barba', duration: 30, price: 20, active: true },
-    { id: 'caio-freestyle', name: 'Freestyle', duration: 60, price: 10, active: true },
-  ];
-}
-function resumoServicos(ids) {
-  const itens = ids.map(id => porId('services', id)).filter(Boolean);
-  if (!itens.length) return null;
-  return {
-    name: itens.map(s => s.name).join(' + '),
-    price: itens.reduce((total, s) => total + s.price, 0),
-    duration: itens.every(s => ['barba', 'sobrancelha'].includes(s.name.toLowerCase())) ? 30 : 60,
-  };
-}
-function resumoAgendamento(a) {
-  return a.serviceSnapshot || (a.serviceIds ? resumoServicos(a.serviceIds) : porId('services', a.serviceId));
-}
+const cfg = window.BARBEARIA_CONFIG || {};
+const configurado = Boolean(cfg.supabaseUrl && cfg.supabaseKey && !cfg.supabaseUrl.startsWith('COLE'));
+const sb = configurado ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey) : null;
 
-function dadosIniciais() {
-  return {
-    seq: 100,
-    catalogVersion: CATALOGO_VERSAO,
-    users: [
-      { id: 'u1', name: 'Administrador', login: 'admin', password: 'admin123', role: 'admin', phone: '' },
-      { id: 'u2', name: 'Cliente Teste', login: 'cliente', password: '123456', role: 'client', phone: '(11) 99999-0000' },
-    ],
-    professionals: [
-      { id: 'p1', name: 'Carlos', active: true },
-      { id: 'p2', name: 'Ana', active: true },
-    ],
-    services: catalogoServicos(),
-    appointments: [],
-    // Avisos para o cliente (ex.: "seu horário foi confirmado")
-    notifications: [],
-  };
-}
-
-function carregar() {
-  try {
-    const salvo = JSON.parse(localStorage.getItem(DB_KEY));
-    if (salvo && salvo.users) {
-      if (salvo.catalogVersion !== CATALOGO_VERSAO) {
-        salvo.appointments.forEach(a => {
-          if (!a.serviceSnapshot) {
-            const antigo = salvo.services.find(s => s.id === a.serviceId);
-            if (antigo) a.serviceSnapshot = { name: antigo.name, price: antigo.price, duration: antigo.duration };
-          }
-        });
-        salvo.services.forEach(s => { s.active = false; });
-        catalogoServicos().forEach(serv => {
-          const existente = salvo.services.find(s => s.id === serv.id);
-          if (existente) Object.assign(existente, serv);
-          else salvo.services.push(serv);
-        });
-        salvo.catalogVersion = CATALOGO_VERSAO;
-        localStorage.setItem(DB_KEY, JSON.stringify(salvo));
-      }
-      return salvo;
-    }
-  } catch (e) { /* dados corrompidos: recomeça */ }
-  const novo = dadosIniciais();
-  localStorage.setItem(DB_KEY, JSON.stringify(novo));
-  return novo;
-}
-
-let db = carregar();
-
-function salvar() {
-  localStorage.setItem(DB_KEY, JSON.stringify(db));
-}
-
-function novoId(prefixo) {
-  db.seq += 1;
-  return prefixo + db.seq;
-}
+// Usuário logado: { id, email, name, phone, role } ou null
+let sessao = null;
+// Cópia local dos dados que o usuário pode ver
+let db = { professionals: [], services: [], appointments: [], notifications: [] };
+// Horários ocupados por dia (de todos os clientes, sem nomes): { '2026-10-09': [...] }
+let ocupadosPorDia = {};
 
 const porId = (lista, id) => db[lista].find(x => x.id === id);
 
+// Converte as linhas do banco para o formato usado nas telas
+function linhaParaAgendamento(r) {
+  return {
+    id: r.id,
+    clientId: r.client_id,
+    professionalId: r.professional_id,
+    serviceIds: r.service_ids,
+    service: { name: r.service_name, price: Number(r.price), duration: r.duration },
+    date: r.date,
+    start: r.start_time.slice(0, 5),
+    status: r.status,
+    paid: r.paid,
+    updatedAt: r.updated_at,
+    cliente: r.cliente || null, // só o ADM recebe nome e telefone
+  };
+}
+
+async function carregarDados() {
+  const ehAdmin = sessao.role === 'admin';
+  const desde = new Date();
+  desde.setDate(desde.getDate() - 60);
+
+  const [profs, servs, appts, avisos] = await Promise.all([
+    sb.from('professionals').select('*').order('created_at'),
+    sb.from('services').select('*').order('created_at'),
+    ehAdmin
+      ? sb.from('appointments').select('*, cliente:profiles(name, phone)').gte('date', dataISO(desde))
+      : sb.from('appointments').select('*').eq('client_id', sessao.id),
+    ehAdmin
+      ? Promise.resolve({ data: [] })
+      : sb.from('notifications').select('*').eq('user_id', sessao.id).order('created_at', { ascending: false }).limit(20),
+  ]);
+  for (const r of [profs, servs, appts, avisos]) if (r.error) throw r.error;
+
+  db.professionals = profs.data;
+  db.services = servs.data.map(s => ({ ...s, price: Number(s.price) }));
+  db.appointments = appts.data.map(linhaParaAgendamento);
+  db.notifications = avisos.data;
+}
+
+async function buscarOcupados(data) {
+  const { data: linhas, error } = await sb.rpc('horarios_ocupados', { p_data: data });
+  if (error) throw error;
+  ocupadosPorDia[data] = linhas.map(o => ({
+    professionalId: o.professional_id,
+    ini: paraMin(o.start_time.slice(0, 5)),
+    fim: paraMin(o.end_time.slice(0, 5)),
+  }));
+}
+
 /* ---------------- Sessão ---------------- */
 
-function usuarioAtual() {
-  const id = sessionStorage.getItem(SESSION_KEY);
-  return id ? porId('users', id) : null;
+async function iniciarSessao() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { sessao = null; return; }
+
+  const { data: perfil, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
+  if (error) throw error;
+  sessao = { id: perfil.id, email: session.user.email, name: perfil.name, phone: perfil.phone, role: perfil.role };
+  await carregarDados();
+  assinarTempoReal();
 }
-function entrar(user) { sessionStorage.setItem(SESSION_KEY, user.id); }
-function sair() { sessionStorage.removeItem(SESSION_KEY); location.hash = '#/login'; }
+
+async function sair() {
+  if (canal) { sb.removeChannel(canal); canal = null; }
+  await sb.auth.signOut();
+  sessao = null;
+  db = { professionals: [], services: [], appointments: [], notifications: [] };
+  ocupadosPorDia = {};
+  location.hash = '#/login';
+  render();
+}
+
+// Traduz os erros mais comuns para o cliente
+function mensagemDeErro(error) {
+  const msg = error?.message || String(error);
+  if (error?.code === '23P01') return 'Ops! Esse horário acabou de ser ocupado. Escolha outro.';
+  if (/invalid login credentials/i.test(msg)) return 'E-mail ou senha incorretos.';
+  if (/email not confirmed/i.test(msg)) return 'Confirme seu e-mail pelo link que enviamos antes de entrar.';
+  if (/already registered|already been registered/i.test(msg)) return 'Esse e-mail já tem uma conta. Faça login.';
+  if (/password should be at least/i.test(msg)) return 'A senha precisa ter pelo menos 6 caracteres.';
+  if (/rate limit|too many/i.test(msg)) return 'Muitas tentativas. Espere um pouco e tente de novo.';
+  if (/failed to fetch|network/i.test(msg)) return 'Sem conexão com o servidor. Verifique sua internet.';
+  return msg;
+}
 
 /* ---------------- Utilitários ---------------- */
 
@@ -122,7 +126,7 @@ function esc(texto) {
 }
 const paraMin = hhmm => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
 const paraHora = min => String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0');
-const dinheiro = v => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const dinheiro = v => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 function dataISO(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -160,16 +164,25 @@ function ordenarAppts(lista) {
 
 /* ---------------- Regras de agenda ---------------- */
 
+// Vários serviços juntos: soma o preço; a duração é a do serviço mais longo
+// (só barba e/ou sobrancelha = 30 min; com qualquer outro = 1 hora)
+function resumoServicos(ids) {
+  const itens = ids.map(id => porId('services', id)).filter(Boolean);
+  if (!itens.length) return null;
+  return {
+    name: itens.map(s => s.name).join(' + '),
+    price: itens.reduce((total, s) => total + s.price, 0),
+    duration: Math.max(...itens.map(s => s.duration)),
+  };
+}
+
 // Retorna todos os horários do dia com a situação de cada um
 function horariosDoDia(data, profissionalId, duracao) {
   const abre = paraMin(HORARIO.abre);
   const fecha = paraMin(HORARIO.fecha);
   const agora = new Date();
   const minAgora = data === hojeISO() ? agora.getHours() * 60 + agora.getMinutes() : -1;
-
-  const ocupados = db.appointments
-    .filter(a => a.date === data && a.professionalId === profissionalId && ATIVOS.includes(a.status))
-    .map(a => ({ ini: paraMin(a.start), fim: paraMin(a.start) + resumoAgendamento(a).duration }));
+  const ocupados = (ocupadosPorDia[data] || []).filter(o => o.professionalId === profissionalId);
 
   const slots = [];
   for (let ini = abre; ini + duracao <= fecha; ini += HORARIO.intervalo) {
@@ -180,13 +193,6 @@ function horariosDoDia(data, profissionalId, duracao) {
     slots.push({ hora: paraHora(ini), situacao });
   }
   return slots;
-}
-
-function horarioDisponivel(data, profissionalId, serviceIds, hora) {
-  const serv = resumoServicos(serviceIds);
-  if (!serv || serviceIds.some(id => !porId('services', id)?.active)) return false;
-  const slot = horariosDoDia(data, profissionalId, serv.duration).find(s => s.hora === hora);
-  return slot && slot.situacao === 'livre';
 }
 
 /* ---------------- Notificações na tela ---------------- */
@@ -218,11 +224,55 @@ function avisoNavegador(titulo, corpo) {
   }
 }
 
+/* ---------------- Tempo real ---------------- */
+
+let canal = null;
+
+function assinarTempoReal() {
+  if (canal) sb.removeChannel(canal);
+  canal = sb.channel('barbearia-' + sessao.id);
+
+  if (sessao.role === 'admin') {
+    // O ADM fica sabendo na hora de pedidos novos e cancelamentos
+    canal.on('postgres_changes', { event: '*', schema: 'public', table: 'appointments' }, async payload => {
+      await recarregarEmSegundoPlano();
+      if (payload.eventType === 'INSERT') {
+        const a = porId('appointments', payload.new.id);
+        if (!a) return;
+        const msg = `${a.cliente?.name || 'Cliente'} pediu ${a.service.name} em ${dataBonita(a.date)} às ${a.start}`;
+        toast('🔔 Novo pedido! ' + msg, true);
+        avisoNavegador('Novo pedido de agendamento', msg);
+        bip();
+      }
+    });
+  } else {
+    // O cliente recebe na hora o aviso de confirmado/recusado
+    canal.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${sessao.id}` }, async payload => {
+      toast('🔔 ' + payload.new.text, true);
+      bip();
+      await recarregarEmSegundoPlano();
+    });
+  }
+  canal.subscribe();
+}
+
+// Atualiza os dados sem atrapalhar quem está digitando num formulário
+async function recarregarEmSegundoPlano() {
+  try {
+    await carregarDados();
+  } catch (e) {
+    return;
+  }
+  const rota = rotaAtual();
+  if (['pedidos', 'agenda', 'home', 'conta'].includes(rota)) render();
+  else desenharTopo(sessao, rota);
+}
+
 /* ---------------- Barra superior ---------------- */
 
 function desenharTopo(user, rota) {
   const topo = document.getElementById('topbar');
-  if (!user) { topo.classList.add('hidden'); return; }
+  if (!user) { topo.classList.add('hidden'); document.title = 'Barbearia do Caio'; return; }
   topo.classList.remove('hidden');
 
   const link = (href, texto, extra = '') =>
@@ -240,7 +290,7 @@ function desenharTopo(user, rota) {
       ${link('servicos', 'Serviços')}
       <button class="link" id="btn-sair">Sair</button>`;
   } else {
-    const naoLidas = db.notifications.filter(n => n.userId === user.id && !n.read).length;
+    const naoLidas = db.notifications.filter(n => !n.read).length;
     document.title = (naoLidas ? `(${naoLidas}) ` : '') + 'Barbearia do Caio';
     topo.innerHTML = `
       <span class="brand">Barbearia do Caio</span>
@@ -258,6 +308,49 @@ function desenharTopo(user, rota) {
 
 const app = document.getElementById('app');
 
+// Desliga o botão enquanto espera o servidor responder
+async function comBotaoOcupado(btn, tarefa) {
+  const texto = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Aguarde…';
+  try {
+    return await tarefa();
+  } finally {
+    if (btn.isConnected) { btn.disabled = false; btn.textContent = texto; }
+  }
+}
+
+/* ---------- Aviso de configuração / carregando / erro ---------- */
+function telaSemConfiguracao() {
+  app.innerHTML = `
+    <div class="auth">
+      <h1>Barbearia do Caio</h1>
+      <div class="card stack">
+        <strong>Falta ligar o site ao banco de dados.</strong>
+        <p class="sub" style="margin:0">Preencha o arquivo <code>config.js</code> com a Project URL e a chave publishable do Supabase.</p>
+      </div>
+    </div>`;
+}
+
+function telaCarregando() {
+  app.innerHTML = '<div class="empty">Carregando…</div>';
+}
+
+function telaErro(error) {
+  app.innerHTML = `
+    <div class="auth">
+      <div class="card stack">
+        <strong>Não foi possível carregar a barbearia.</strong>
+        <p class="sub" style="margin:0">${esc(mensagemDeErro(error))}</p>
+        <div class="row">
+          <button class="btn" onclick="location.reload()">Tentar de novo</button>
+          <button class="btn secondary" id="btn-erro-sair">Sair da conta</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('btn-erro-sair').onclick = sair;
+}
+
 /* ---------- Login ---------- */
 function telaLogin() {
   app.innerHTML = `
@@ -265,7 +358,7 @@ function telaLogin() {
       <h1>Barbearia do Caio</h1>
       <p class="sub">Entre para agendar seu horário</p>
       <form class="card stack" id="form-login">
-        <div class="field"><label for="login">Login</label><input id="login" autocomplete="username" required></div>
+        <div class="field"><label for="email">E-mail</label><input id="email" type="email" autocomplete="email" required></div>
         <div class="field"><label for="senha">Senha</label><input id="senha" type="password" autocomplete="current-password" required></div>
         <div class="error" id="erro"></div>
         <button class="btn block">Entrar</button>
@@ -273,14 +366,25 @@ function telaLogin() {
       </form>
     </div>`;
 
-  document.getElementById('form-login').onsubmit = e => {
+  const form = document.getElementById('form-login');
+  form.onsubmit = async e => {
     e.preventDefault();
-    const login = document.getElementById('login').value.trim().toLowerCase();
-    const senha = document.getElementById('senha').value;
-    const user = db.users.find(u => u.login === login && u.password === senha);
-    if (!user) { document.getElementById('erro').textContent = 'Login ou senha incorretos.'; return; }
-    entrar(user);
-    location.hash = user.role === 'admin' ? '#/pedidos' : '#/home';
+    const erro = document.getElementById('erro');
+    erro.textContent = '';
+    await comBotaoOcupado(form.querySelector('button'), async () => {
+      const { error } = await sb.auth.signInWithPassword({
+        email: document.getElementById('email').value.trim(),
+        password: document.getElementById('senha').value,
+      });
+      if (error) { erro.textContent = mensagemDeErro(error); return; }
+      try {
+        await iniciarSessao();
+      } catch (err) {
+        erro.textContent = mensagemDeErro(err);
+        return;
+      }
+      location.hash = sessao.role === 'admin' ? '#/pedidos' : '#/home';
+    });
   };
 }
 
@@ -291,9 +395,9 @@ function telaCadastro() {
       <h1>Criar conta</h1>
       <p class="sub">Leva menos de um minuto</p>
       <form class="card stack" id="form-cad">
-        <div class="field"><label for="nome">Nome</label><input id="nome" required></div>
-        <div class="field"><label for="tel">Telefone</label><input id="tel" type="tel" placeholder="(11) 90000-0000" required></div>
-        <div class="field"><label for="login">Login</label><input id="login" autocomplete="username" required></div>
+        <div class="field"><label for="nome">Nome</label><input id="nome" autocomplete="name" required></div>
+        <div class="field"><label for="tel">Telefone</label><input id="tel" type="tel" autocomplete="tel" placeholder="(11) 90000-0000" required></div>
+        <div class="field"><label for="email">E-mail</label><input id="email" type="email" autocomplete="email" required></div>
         <div class="field"><label for="senha">Senha (mín. 6 caracteres)</label><input id="senha" type="password" minlength="6" autocomplete="new-password" required></div>
         <div class="error" id="erro"></div>
         <button class="btn block">Criar conta</button>
@@ -301,33 +405,52 @@ function telaCadastro() {
       </form>
     </div>`;
 
-  document.getElementById('form-cad').onsubmit = e => {
+  const form = document.getElementById('form-cad');
+  form.onsubmit = async e => {
     e.preventDefault();
-    const login = document.getElementById('login').value.trim().toLowerCase();
-    if (db.users.some(u => u.login === login)) {
-      document.getElementById('erro').textContent = 'Esse login já está em uso.';
-      return;
-    }
-    const user = {
-      id: novoId('u'),
-      name: document.getElementById('nome').value.trim(),
-      phone: document.getElementById('tel').value.trim(),
-      login,
-      password: document.getElementById('senha').value,
-      role: 'client',
-    };
-    db.users.push(user);
-    salvar();
-    entrar(user);
-    location.hash = '#/home';
+    const erro = document.getElementById('erro');
+    erro.textContent = '';
+    await comBotaoOcupado(form.querySelector('button'), async () => {
+      const { data, error } = await sb.auth.signUp({
+        email: document.getElementById('email').value.trim(),
+        password: document.getElementById('senha').value,
+        options: {
+          data: {
+            name: document.getElementById('nome').value.trim(),
+            phone: document.getElementById('tel').value.trim(),
+          },
+          emailRedirectTo: location.origin + location.pathname,
+        },
+      });
+      if (error) { erro.textContent = mensagemDeErro(error); return; }
+
+      // Se o Supabase exigir confirmação de e-mail, ainda não há sessão
+      if (!data.session) {
+        app.innerHTML = `
+          <div class="auth">
+            <div class="card stack">
+              <strong>Quase lá! 📩</strong>
+              <p style="margin:0">Enviamos um link de confirmação para <strong>${esc(data.user?.email || '')}</strong>. Abra seu e-mail, confirme e depois faça login.</p>
+              <a class="btn block" href="#/login" style="text-align:center">Ir para o login</a>
+            </div>
+          </div>`;
+        return;
+      }
+      try {
+        await iniciarSessao();
+      } catch (err) {
+        erro.textContent = mensagemDeErro(err);
+        return;
+      }
+      location.hash = '#/home';
+    });
   };
 }
 
 /* ---------- Cartão de agendamento (usado em várias telas) ---------- */
 function cartaoAppt(a, { paraAdmin = false } = {}) {
-  const serv = resumoAgendamento(a);
+  const serv = a.service;
   const prof = porId('professionals', a.professionalId);
-  const cliente = porId('users', a.clientId);
   const st = STATUS[a.status];
   const ehHoje = a.date === hojeISO();
 
@@ -350,12 +473,15 @@ function cartaoAppt(a, { paraAdmin = false } = {}) {
       : `<div class="meta">💳 Pagamento ${ehHoje ? '<strong>hoje</strong>, no local' : 'somente no dia do atendimento, no local'}</div>`;
   }
 
+  const cliente = a.cliente ? ` · 👤 ${esc(a.cliente.name)} ${esc(a.cliente.phone)}` : '';
+  const fim = paraHora(paraMin(a.start) + serv.duration);
+
   return `
     <div class="card appt">
       <div class="info">
         <strong>${esc(serv.name)} · ${dinheiro(serv.price)}</strong>
-        <div class="meta">📅 ${esc(dataBonita(a.date))} às ${a.start} (${serv.duration} min)</div>
-        <div class="meta">✂ ${esc(prof.name)}${paraAdmin ? ` · 👤 ${esc(cliente.name)} ${esc(cliente.phone)}` : ''}</div>
+        <div class="meta">📅 ${esc(dataBonita(a.date))} · ${a.start} às ${fim} (${serv.duration} min)</div>
+        <div class="meta">✂ ${esc(prof?.name || '—')}${paraAdmin ? cliente : ''}</div>
         ${pagamento}
       </div>
       <span class="status ${st.classe}">${st.texto}</span>
@@ -364,50 +490,47 @@ function cartaoAppt(a, { paraAdmin = false } = {}) {
 }
 
 // Liga os botões de ação dos cartões (aceitar, recusar, cancelar, pagar)
-function ligarAcoes(user) {
+function ligarAcoes() {
   app.querySelectorAll('[data-acao]').forEach(btn => {
-    btn.onclick = () => {
-      const a = porId('appointments', btn.dataset.id);
+    btn.onclick = async () => {
+      const id = btn.dataset.id;
       const acao = btn.dataset.acao;
-      const serv = resumoAgendamento(a);
-      const quando = `${dataBonita(a.date)} às ${a.start}`;
 
-      if (acao === 'cancelar') {
-        if (!confirm('Cancelar este agendamento?')) return;
-        a.status = 'cancelled';
-        toast('Agendamento cancelado.');
-      } else if (acao === 'aceitar') {
-        a.status = 'confirmed';
-        notificarCliente(a.clientId, `Seu horário de ${serv.name} em ${quando} foi CONFIRMADO ✅`);
-        toast('Pedido aceito. O cliente será avisado.');
-      } else if (acao === 'recusar') {
-        if (!confirm('Recusar este pedido? O horário ficará livre novamente.')) return;
-        a.status = 'rejected';
-        notificarCliente(a.clientId, `Seu pedido de ${serv.name} em ${quando} foi recusado. Escolha outro horário.`);
-        toast('Pedido recusado.');
-      } else if (acao === 'pagar') {
-        if (a.date !== hojeISO()) return;
-        a.paid = true;
-        toast('Pagamento registrado.');
-      }
-      a.updatedAt = Date.now();
-      salvar();
-      render();
+      if (acao === 'cancelar' && !confirm('Cancelar este agendamento?')) return;
+      if (acao === 'recusar' && !confirm('Recusar este pedido? O horário ficará livre novamente.')) return;
+
+      const chamadas = {
+        cancelar: () => sb.rpc('cancelar_agendamento', { p_id: id }),
+        aceitar:  () => sb.rpc('responder_pedido', { p_id: id, p_aceitar: true }),
+        recusar:  () => sb.rpc('responder_pedido', { p_id: id, p_aceitar: false }),
+        pagar:    () => sb.rpc('registrar_pagamento', { p_id: id }),
+      };
+      const mensagens = {
+        cancelar: 'Agendamento cancelado.',
+        aceitar: 'Pedido aceito. O cliente será avisado.',
+        recusar: 'Pedido recusado.',
+        pagar: 'Pagamento registrado.',
+      };
+
+      await comBotaoOcupado(btn, async () => {
+        const { error } = await chamadas[acao]();
+        if (error) { toast(mensagemDeErro(error), true); return; }
+        toast(mensagens[acao]);
+        ocupadosPorDia = {};
+        await carregarDados();
+        render();
+      });
     };
   });
 }
 
-function notificarCliente(userId, texto) {
-  db.notifications.push({ id: novoId('n'), userId, text: texto, read: false, createdAt: Date.now() });
-}
-
 /* ---------- Cliente: Início ---------- */
 function telaHome(user) {
-  const proximos = ordenarAppts(db.appointments.filter(a => a.clientId === user.id && ATIVOS.includes(a.status) && !jaPassou(a)));
+  const proximos = ordenarAppts(db.appointments.filter(a => ATIVOS.includes(a.status) && !jaPassou(a)));
   const servicos = db.services.filter(s => s.active);
 
   app.innerHTML = `
-    <h1>Olá, ${esc(user.name.split(' ')[0])}!</h1>
+    <h1>Olá, ${esc((user.name || 'cliente').split(' ')[0])}!</h1>
     <p class="sub">Seu estilo, seu momento. Escolha seu próximo horário.</p>
     <a class="btn" href="#/agendar">Agendar horário</a>
 
@@ -423,7 +546,7 @@ function telaHome(user) {
           <div style="font-size:18px;margin-top:6px">${dinheiro(s.price)}</div>
         </div>`).join('')}
     </div>`;
-  ligarAcoes(user);
+  ligarAcoes();
 }
 
 /* ---------- Cliente: Agendar ---------- */
@@ -434,6 +557,7 @@ function telaAgendar(user) {
   const profs = db.professionals.filter(p => p.active);
   const dias = proximosDias();
   if (escolha.date && !dias.includes(escolha.date)) escolha.date = null;
+  if (escolha.professionalId && !profs.some(p => p.id === escolha.professionalId)) escolha.professionalId = null;
 
   escolha.serviceIds = escolha.serviceIds.filter(id => servicos.some(s => s.id === id));
   const serv = resumoServicos(escolha.serviceIds);
@@ -441,17 +565,26 @@ function telaAgendar(user) {
 
   let blocoHorarios = '<p class="sub">Escolha serviço, profissional e dia para ver os horários.</p>';
   if (serv && prof && escolha.date) {
-    const slots = horariosDoDia(escolha.date, prof.id, serv.duration);
-    if (escolha.start && !slots.some(s => s.hora === escolha.start && s.situacao === 'livre')) escolha.start = null;
-    blocoHorarios = `
-      <div class="choices">
-        ${slots.map(s => `
-          <button type="button" class="choice slot ${s.situacao === 'ocupado' ? 'busy' : ''} ${s.situacao === 'passado' ? 'past' : ''} ${escolha.start === s.hora ? 'selected' : ''}"
-            data-campo="start" data-valor="${s.hora}" ${s.situacao !== 'livre' ? 'disabled' : ''}>
-            ${s.hora}${s.situacao === 'ocupado' ? '<small>Ocupado</small>' : ''}
-          </button>`).join('')}
-      </div>
-      <div class="legend"><span class="l-free">Livre</span><span class="l-busy">Ocupado por outro cliente</span><span class="l-past">Indisponível</span></div>`;
+    if (!ocupadosPorDia[escolha.date]) {
+      // Busca no servidor os horários já ocupados nesse dia e redesenha
+      blocoHorarios = '<p class="sub">Carregando horários…</p>';
+      const dia = escolha.date;
+      buscarOcupados(dia)
+        .then(() => { if (rotaAtual() === 'agendar' && escolha.date === dia) telaAgendar(user); })
+        .catch(err => toast(mensagemDeErro(err), true));
+    } else {
+      const slots = horariosDoDia(escolha.date, prof.id, serv.duration);
+      if (escolha.start && !slots.some(s => s.hora === escolha.start && s.situacao === 'livre')) escolha.start = null;
+      blocoHorarios = `
+        <div class="choices">
+          ${slots.map(s => `
+            <button type="button" class="choice slot ${s.situacao === 'ocupado' ? 'busy' : ''} ${s.situacao === 'passado' ? 'past' : ''} ${escolha.start === s.hora ? 'selected' : ''}"
+              data-campo="start" data-valor="${s.hora}" ${s.situacao !== 'livre' ? 'disabled' : ''}>
+              ${s.hora}${s.situacao === 'ocupado' ? '<small>Ocupado</small>' : ''}
+            </button>`).join('')}
+        </div>
+        <div class="legend"><span class="l-free">Livre</span><span class="l-busy">Ocupado por outro cliente</span><span class="l-past">Indisponível</span></div>`;
+    }
   }
 
   const pronto = serv && prof && escolha.date && escolha.start;
@@ -492,7 +625,7 @@ function telaAgendar(user) {
     <div class="card summary stack">
       ${pronto
         ? `<div><strong>${esc(serv.name)}</strong> com <strong>${esc(prof.name)}</strong></div>
-           <div>${esc(dataBonita(escolha.date))} às <strong>${escolha.start}</strong> · ${serv.duration} min</div>
+           <div>${esc(dataBonita(escolha.date))} · <strong>${escolha.start} às ${paraHora(paraMin(escolha.start) + serv.duration)}</strong> (${serv.duration} min)</div>
            <div>Valor: <strong>${dinheiro(serv.price)}</strong> — pago no dia, no local</div>`
         : '<div class="sub" style="margin:0">Complete as etapas acima.</div>'}
       <button class="btn" id="btn-confirmar" ${pronto ? '' : 'disabled'}>Enviar pedido</button>
@@ -500,53 +633,51 @@ function telaAgendar(user) {
 
   app.querySelectorAll('[data-campo]').forEach(btn => {
     btn.onclick = () => {
-      if (btn.dataset.campo === 'serviceIds') {
+      const campo = btn.dataset.campo;
+      if (campo === 'serviceIds') {
         const id = btn.dataset.valor;
         escolha.serviceIds = escolha.serviceIds.includes(id) ? escolha.serviceIds.filter(x => x !== id) : [...escolha.serviceIds, id];
-      } else escolha[btn.dataset.campo] = btn.dataset.valor;
-      if (btn.dataset.campo !== 'start') escolha.start = null;
+      } else escolha[campo] = btn.dataset.valor;
+      // Ao trocar de dia, busca os horários de novo (outro cliente pode ter marcado)
+      if (campo === 'date') delete ocupadosPorDia[escolha.date];
+      if (campo !== 'start') escolha.start = null;
       telaAgendar(user);
     };
   });
 
-  document.getElementById('btn-confirmar').onclick = () => {
-    db = carregar(); // pega a versão mais recente (outro cliente pode ter marcado)
-    if (!horarioDisponivel(escolha.date, escolha.professionalId, escolha.serviceIds, escolha.start)) {
-      toast('Ops! Esse horário acabou de ser ocupado. Escolha outro.', true);
+  const btnConfirmar = document.getElementById('btn-confirmar');
+  btnConfirmar.onclick = () => comBotaoOcupado(btnConfirmar, async () => {
+    const { error } = await sb.from('appointments').insert({
+      professional_id: escolha.professionalId,
+      service_ids: escolha.serviceIds,
+      date: escolha.date,
+      start_time: escolha.start,
+    });
+    if (error) {
+      toast(mensagemDeErro(error), true);
+      delete ocupadosPorDia[escolha.date];
       escolha.start = null;
       telaAgendar(user);
       return;
     }
-    db.appointments.push({
-      id: novoId('a'),
-      clientId: user.id,
-      professionalId: escolha.professionalId,
-      serviceIds: [...escolha.serviceIds],
-      serviceSnapshot: resumoServicos(escolha.serviceIds),
-      date: escolha.date,
-      start: escolha.start,
-      status: 'pending',
-      paid: false,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-    salvar();
     Object.assign(escolha, { serviceIds: [], professionalId: null, date: null, start: null });
+    ocupadosPorDia = {};
+    await carregarDados();
     toast('Pedido enviado! Você será avisado quando o barbeiro responder.');
     location.hash = '#/conta';
-  };
+  });
 }
 
 /* ---------- Cliente: Minha conta ---------- */
 function telaConta(user) {
-  const meus = db.appointments.filter(a => a.clientId === user.id);
+  const meus = db.appointments;
   const futuros = ordenarAppts(meus.filter(a => !jaPassou(a) && a.status !== 'cancelled'));
   const historico = ordenarAppts(meus.filter(a => jaPassou(a) || a.status === 'cancelled')).reverse();
-  const avisos = db.notifications.filter(n => n.userId === user.id).sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
+  const avisos = db.notifications.slice(0, 5);
 
   app.innerHTML = `
     <h1>Minha conta</h1>
-    <p class="sub">${esc(user.name)} · ${esc(user.phone)} · login: ${esc(user.login)}</p>
+    <p class="sub">${esc(user.name)} · ${esc(user.phone)} · ${esc(user.email)}</p>
     <a class="btn" href="#/agendar">Agendar horário</a>
 
     ${avisos.length ? `
@@ -562,16 +693,23 @@ function telaConta(user) {
     <div class="stack">${historico.length ? historico.map(a => cartaoAppt(a)).join('') : '<div class="card empty">Nada por aqui ainda.</div>'}</div>`;
 
   // Marca os avisos como lidos depois de exibir
-  let mudou = false;
-  db.notifications.forEach(n => { if (n.userId === user.id && !n.read) { n.read = true; mudou = true; } });
-  if (mudou) { salvar(); desenharTopo(user, 'conta'); }
-  ligarAcoes(user);
+  if (db.notifications.some(n => !n.read)) {
+    sb.rpc('marcar_avisos_lidos').then(({ error }) => {
+      if (error) return;
+      db.notifications.forEach(n => { n.read = true; });
+      desenharTopo(user, rotaAtual());
+    });
+  }
+  ligarAcoes();
 }
 
 /* ---------- ADM: Pedidos ---------- */
-function telaPedidos(user) {
+function telaPedidos() {
   const pendentes = ordenarAppts(db.appointments.filter(a => a.status === 'pending'));
-  const recentes = db.appointments.filter(a => a.status !== 'pending').sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
+  const recentes = db.appointments
+    .filter(a => a.status !== 'pending')
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .slice(0, 8);
   const podeAvisar = 'Notification' in window && Notification.permission === 'default';
 
   app.innerHTML = `
@@ -587,14 +725,14 @@ function telaPedidos(user) {
 
   const btnAvisos = document.getElementById('btn-avisos');
   if (btnAvisos) btnAvisos.onclick = () => Notification.requestPermission().then(() => render());
-  ligarAcoes(user);
+  ligarAcoes();
 }
 
 /* ---------- ADM: Agenda do dia ---------- */
 let agendaData = null;
 let agendaProf = 'todos';
 
-function telaAgenda(user) {
+function telaAgenda() {
   agendaData = agendaData || hojeISO();
   const profs = db.professionals;
   const doDia = ordenarAppts(db.appointments.filter(a =>
@@ -617,7 +755,18 @@ function telaAgenda(user) {
 
   document.getElementById('ag-data').onchange = e => { agendaData = e.target.value || hojeISO(); render(); };
   document.getElementById('ag-prof').onchange = e => { agendaProf = e.target.value; render(); };
-  ligarAcoes(user);
+  ligarAcoes();
+}
+
+// Salva uma alteração do ADM (profissional/serviço) e redesenha
+async function salvarAdm(btn, operacao, sucesso) {
+  await comBotaoOcupado(btn, async () => {
+    const { error } = await operacao();
+    if (error) { toast(mensagemDeErro(error), true); return; }
+    if (sucesso) toast(sucesso);
+    await carregarDados();
+    render();
+  });
 }
 
 /* ---------- ADM: Profissionais ---------- */
@@ -644,21 +793,19 @@ function telaProfissionais() {
       </table>
     </div>`;
 
-  document.getElementById('form-prof').onsubmit = e => {
+  const form = document.getElementById('form-prof');
+  form.onsubmit = e => {
     e.preventDefault();
     const nome = document.getElementById('prof-nome').value.trim();
     if (!nome) return;
-    db.professionals.push({ id: novoId('p'), name: nome, active: true });
-    salvar();
-    toast(`${nome} foi adicionado(a) à equipe.`);
-    render();
+    salvarAdm(form.querySelector('button'),
+      () => sb.from('professionals').insert({ name: nome }),
+      `${nome} foi adicionado(a) à equipe.`);
   };
   app.querySelectorAll('[data-toggle]').forEach(btn => {
     btn.onclick = () => {
       const p = porId('professionals', btn.dataset.toggle);
-      p.active = !p.active;
-      salvar();
-      render();
+      salvarAdm(btn, () => sb.from('professionals').update({ active: !p.active }).eq('id', p.id));
     };
   });
 }
@@ -690,24 +837,20 @@ function telaServicos() {
       </table>
     </div>`;
 
-  document.getElementById('form-serv').onsubmit = e => {
+  const form = document.getElementById('form-serv');
+  form.onsubmit = e => {
     e.preventDefault();
-    db.services.push({
-      id: novoId('s'),
+    const novo = {
       name: document.getElementById('sv-nome').value.trim(),
       duration: Number(document.getElementById('sv-dur').value),
       price: Number(document.getElementById('sv-preco').value),
-      active: true,
-    });
-    salvar();
-    render();
+    };
+    salvarAdm(form.querySelector('button'), () => sb.from('services').insert(novo), `${novo.name} foi adicionado.`);
   };
   app.querySelectorAll('[data-toggle]').forEach(btn => {
     btn.onclick = () => {
       const s = porId('services', btn.dataset.toggle);
-      s.active = !s.active;
-      salvar();
-      render();
+      salvarAdm(btn, () => sb.from('services').update({ active: !s.active }).eq('id', s.id));
     };
   });
 }
@@ -719,9 +862,12 @@ function telaServicos() {
 const ROTAS_CLIENTE = { home: telaHome, agendar: telaAgendar, conta: telaConta };
 const ROTAS_ADMIN = { pedidos: telaPedidos, agenda: telaAgenda, profissionais: telaProfissionais, servicos: telaServicos };
 
+const rotaAtual = () => location.hash.replace('#/', '');
+
 function render() {
-  const user = usuarioAtual();
-  let rota = location.hash.replace('#/', '') || '';
+  if (!sb) return telaSemConfiguracao();
+  const user = sessao;
+  const rota = rotaAtual();
 
   if (!user) {
     desenharTopo(null);
@@ -752,38 +898,15 @@ function animarEntrada() {
 
 window.addEventListener('hashchange', () => { animarEntrada(); render(); });
 
-/* Quando outra aba muda os dados (ex.: cliente faz um pedido),
-   esta aba é avisada. É assim que o ADM recebe o aviso na hora. */
-window.addEventListener('storage', e => {
-  if (e.key !== DB_KEY) return;
-  const antes = db;
-  db = carregar();
-  const user = usuarioAtual();
-  if (!user) return;
-
-  if (user.role === 'admin') {
-    const idsAntes = new Set(antes.appointments.map(a => a.id));
-    db.appointments
-      .filter(a => !idsAntes.has(a.id) && a.status === 'pending')
-      .forEach(a => {
-        const cli = porId('users', a.clientId);
-        const serv = resumoAgendamento(a);
-        const msg = `${cli.name} pediu ${serv.name} em ${dataBonita(a.date)} às ${a.start}`;
-        toast('🔔 Novo pedido! ' + msg, true);
-        avisoNavegador('Novo pedido de agendamento', msg);
-        bip();
-      });
-  } else {
-    const idsAntes = new Set(antes.notifications.map(n => n.id));
-    db.notifications
-      .filter(n => n.userId === user.id && !idsAntes.has(n.id))
-      .forEach(n => toast('🔔 ' + n.text, true));
+// Início: recupera o login salvo (se houver) e desenha a tela
+(async function iniciar() {
+  if (!sb) return render();
+  telaCarregando();
+  try {
+    await iniciarSessao();
+  } catch (e) {
+    return telaErro(e);
   }
-
-  // Redesenha a tela; na tela de agendar, as escolhas do cliente são mantidas
+  animarEntrada();
   render();
-});
-
-animarEntrada();
-render();
-
+})();
