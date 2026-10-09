@@ -23,9 +23,33 @@ const ATIVOS = ['pending', 'confirmed'];
 
 /* ---------------- Banco de dados ---------------- */
 
+const CATALOGO_VERSAO = 2;
+function catalogoServicos() {
+  return [
+    { id: 'caio-corte', name: 'Corte', duration: 60, price: 40, active: true },
+    { id: 'caio-penteado', name: 'Penteado', duration: 60, price: 20, active: true },
+    { id: 'caio-sobrancelha', name: 'Sobrancelha', duration: 30, price: 15, active: true },
+    { id: 'caio-barba', name: 'Barba', duration: 30, price: 20, active: true },
+    { id: 'caio-freestyle', name: 'Freestyle', duration: 60, price: 10, active: true },
+  ];
+}
+function resumoServicos(ids) {
+  const itens = ids.map(id => porId('services', id)).filter(Boolean);
+  if (!itens.length) return null;
+  return {
+    name: itens.map(s => s.name).join(' + '),
+    price: itens.reduce((total, s) => total + s.price, 0),
+    duration: itens.every(s => ['barba', 'sobrancelha'].includes(s.name.toLowerCase())) ? 30 : 60,
+  };
+}
+function resumoAgendamento(a) {
+  return a.serviceSnapshot || (a.serviceIds ? resumoServicos(a.serviceIds) : porId('services', a.serviceId));
+}
+
 function dadosIniciais() {
   return {
     seq: 100,
+    catalogVersion: CATALOGO_VERSAO,
     users: [
       { id: 'u1', name: 'Administrador', login: 'admin', password: 'admin123', role: 'admin', phone: '' },
       { id: 'u2', name: 'Cliente Teste', login: 'cliente', password: '123456', role: 'client', phone: '(11) 99999-0000' },
@@ -34,13 +58,7 @@ function dadosIniciais() {
       { id: 'p1', name: 'Carlos', active: true },
       { id: 'p2', name: 'Ana', active: true },
     ],
-    services: [
-      { id: 's1', name: 'Corte', duration: 30, price: 40, active: true },
-      { id: 's2', name: 'Barba', duration: 30, price: 30, active: true },
-      { id: 's3', name: 'Corte + Barba', duration: 60, price: 65, active: true },
-      { id: 's4', name: 'Corte + Modelo', duration: 60, price: 60, active: true },
-      { id: 's5', name: 'Sobrancelha', duration: 30, price: 20, active: true },
-    ],
+    services: catalogoServicos(),
     appointments: [],
     // Avisos para o cliente (ex.: "seu horário foi confirmado")
     notifications: [],
@@ -50,7 +68,25 @@ function dadosIniciais() {
 function carregar() {
   try {
     const salvo = JSON.parse(localStorage.getItem(DB_KEY));
-    if (salvo && salvo.users) return salvo;
+    if (salvo && salvo.users) {
+      if (salvo.catalogVersion !== CATALOGO_VERSAO) {
+        salvo.appointments.forEach(a => {
+          if (!a.serviceSnapshot) {
+            const antigo = salvo.services.find(s => s.id === a.serviceId);
+            if (antigo) a.serviceSnapshot = { name: antigo.name, price: antigo.price, duration: antigo.duration };
+          }
+        });
+        salvo.services.forEach(s => { s.active = false; });
+        catalogoServicos().forEach(serv => {
+          const existente = salvo.services.find(s => s.id === serv.id);
+          if (existente) Object.assign(existente, serv);
+          else salvo.services.push(serv);
+        });
+        salvo.catalogVersion = CATALOGO_VERSAO;
+        localStorage.setItem(DB_KEY, JSON.stringify(salvo));
+      }
+      return salvo;
+    }
   } catch (e) { /* dados corrompidos: recomeça */ }
   const novo = dadosIniciais();
   localStorage.setItem(DB_KEY, JSON.stringify(novo));
@@ -133,7 +169,7 @@ function horariosDoDia(data, profissionalId, duracao) {
 
   const ocupados = db.appointments
     .filter(a => a.date === data && a.professionalId === profissionalId && ATIVOS.includes(a.status))
-    .map(a => ({ ini: paraMin(a.start), fim: paraMin(a.start) + porId('services', a.serviceId).duration }));
+    .map(a => ({ ini: paraMin(a.start), fim: paraMin(a.start) + resumoAgendamento(a).duration }));
 
   const slots = [];
   for (let ini = abre; ini + duracao <= fecha; ini += HORARIO.intervalo) {
@@ -146,8 +182,9 @@ function horariosDoDia(data, profissionalId, duracao) {
   return slots;
 }
 
-function horarioDisponivel(data, profissionalId, serviceId, hora) {
-  const serv = porId('services', serviceId);
+function horarioDisponivel(data, profissionalId, serviceIds, hora) {
+  const serv = resumoServicos(serviceIds);
+  if (!serv || serviceIds.some(id => !porId('services', id)?.active)) return false;
   const slot = horariosDoDia(data, profissionalId, serv.duration).find(s => s.hora === hora);
   return slot && slot.situacao === 'livre';
 }
@@ -288,7 +325,7 @@ function telaCadastro() {
 
 /* ---------- Cartão de agendamento (usado em várias telas) ---------- */
 function cartaoAppt(a, { paraAdmin = false } = {}) {
-  const serv = porId('services', a.serviceId);
+  const serv = resumoAgendamento(a);
   const prof = porId('professionals', a.professionalId);
   const cliente = porId('users', a.clientId);
   const st = STATUS[a.status];
@@ -332,7 +369,7 @@ function ligarAcoes(user) {
     btn.onclick = () => {
       const a = porId('appointments', btn.dataset.id);
       const acao = btn.dataset.acao;
-      const serv = porId('services', a.serviceId);
+      const serv = resumoAgendamento(a);
       const quando = `${dataBonita(a.date)} às ${a.start}`;
 
       if (acao === 'cancelar') {
@@ -390,7 +427,7 @@ function telaHome(user) {
 }
 
 /* ---------- Cliente: Agendar ---------- */
-const escolha = { serviceId: null, professionalId: null, date: null, start: null };
+const escolha = { serviceIds: [], professionalId: null, date: null, start: null };
 
 function telaAgendar(user) {
   const servicos = db.services.filter(s => s.active);
@@ -398,7 +435,8 @@ function telaAgendar(user) {
   const dias = proximosDias();
   if (escolha.date && !dias.includes(escolha.date)) escolha.date = null;
 
-  const serv = escolha.serviceId && porId('services', escolha.serviceId);
+  escolha.serviceIds = escolha.serviceIds.filter(id => servicos.some(s => s.id === id));
+  const serv = resumoServicos(escolha.serviceIds);
   const prof = escolha.professionalId && porId('professionals', escolha.professionalId);
 
   let blocoHorarios = '<p class="sub">Escolha serviço, profissional e dia para ver os horários.</p>';
@@ -422,10 +460,11 @@ function telaAgendar(user) {
     <h1>Agendar horário</h1>
     <p class="sub">O pagamento é feito no dia do atendimento, direto na barbearia.</p>
 
-    <h2>1. Serviço</h2>
+    <h2>1. Serviços</h2>
+    <p class="sub">Escolha um ou mais. Somente barba e/ou sobrancelha: 30 min. Com qualquer outro serviço: 1 hora.</p>
     <div class="choices">
       ${servicos.map(s => `
-        <button type="button" class="choice ${escolha.serviceId === s.id ? 'selected' : ''}" data-campo="serviceId" data-valor="${s.id}">
+        <button type="button" class="choice ${escolha.serviceIds.includes(s.id) ? 'selected' : ''}" aria-pressed="${escolha.serviceIds.includes(s.id)}" data-campo="serviceIds" data-valor="${s.id}">
           ${esc(s.name)}<small>${s.duration} min · ${dinheiro(s.price)}</small>
         </button>`).join('')}
     </div>
@@ -461,7 +500,10 @@ function telaAgendar(user) {
 
   app.querySelectorAll('[data-campo]').forEach(btn => {
     btn.onclick = () => {
-      escolha[btn.dataset.campo] = btn.dataset.valor;
+      if (btn.dataset.campo === 'serviceIds') {
+        const id = btn.dataset.valor;
+        escolha.serviceIds = escolha.serviceIds.includes(id) ? escolha.serviceIds.filter(x => x !== id) : [...escolha.serviceIds, id];
+      } else escolha[btn.dataset.campo] = btn.dataset.valor;
       if (btn.dataset.campo !== 'start') escolha.start = null;
       telaAgendar(user);
     };
@@ -469,7 +511,7 @@ function telaAgendar(user) {
 
   document.getElementById('btn-confirmar').onclick = () => {
     db = carregar(); // pega a versão mais recente (outro cliente pode ter marcado)
-    if (!horarioDisponivel(escolha.date, escolha.professionalId, escolha.serviceId, escolha.start)) {
+    if (!horarioDisponivel(escolha.date, escolha.professionalId, escolha.serviceIds, escolha.start)) {
       toast('Ops! Esse horário acabou de ser ocupado. Escolha outro.', true);
       escolha.start = null;
       telaAgendar(user);
@@ -479,7 +521,8 @@ function telaAgendar(user) {
       id: novoId('a'),
       clientId: user.id,
       professionalId: escolha.professionalId,
-      serviceId: escolha.serviceId,
+      serviceIds: [...escolha.serviceIds],
+      serviceSnapshot: resumoServicos(escolha.serviceIds),
       date: escolha.date,
       start: escolha.start,
       status: 'pending',
@@ -488,7 +531,7 @@ function telaAgendar(user) {
       updatedAt: Date.now(),
     });
     salvar();
-    Object.assign(escolha, { serviceId: null, professionalId: null, date: null, start: null });
+    Object.assign(escolha, { serviceIds: [], professionalId: null, date: null, start: null });
     toast('Pedido enviado! Você será avisado quando o barbeiro responder.');
     location.hash = '#/conta';
   };
@@ -724,7 +767,7 @@ window.addEventListener('storage', e => {
       .filter(a => !idsAntes.has(a.id) && a.status === 'pending')
       .forEach(a => {
         const cli = porId('users', a.clientId);
-        const serv = porId('services', a.serviceId);
+        const serv = resumoAgendamento(a);
         const msg = `${cli.name} pediu ${serv.name} em ${dataBonita(a.date)} às ${a.start}`;
         toast('🔔 Novo pedido! ' + msg, true);
         avisoNavegador('Novo pedido de agendamento', msg);

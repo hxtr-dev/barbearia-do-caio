@@ -374,3 +374,8 @@ input:focus, select:focus { box-shadow: 0 0 0 4px rgba(212, 175, 55, .2); }
 @media (prefers-reduced-motion: reduce) {
   body::before { animation: none; }
 }
+
+.whatsapp-link { position: fixed; right: 16px; bottom: 18px; z-index: 9; background: var(--primary); color: #201907; padding: 12px 18px; border-radius: 24px; text-decoration: none; font-weight: 700; box-shadow: 0 4px 16px #0006; }
+.whatsapp-link:hover { background: #e5c65d; }
+.toasts { bottom: 80px; }
+.container { padding-bottom: 100px; }
