@@ -11,5 +11,5 @@ window.BARBEARIA_CONFIG = {
   supabaseKey: 'sb_publishable_XoNU2R2st64lgZQQniTGeQ_pR8BA3Vv',
 
   // Google Analytics: cole o "ID da métrica" (começa com G-). Vazio = desligado.
-  googleAnalyticsId: '',
+  googleAnalyticsId: 'G-GBVBJLFH3J',
 };
