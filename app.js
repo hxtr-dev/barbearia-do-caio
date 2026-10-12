@@ -83,6 +83,50 @@ async function buscarOcupados(data) {
   }));
 }
 
+/* ---------------- Fotos dos profissionais ---------------- */
+
+const FOTO_LADO = 400; // a foto vira um quadrado de 400x400
+
+// Foto redonda do profissional (ou as iniciais, se ainda não tiver foto)
+function avatarProf(p, classe = '') {
+  if (p.photo_url) {
+    return `<img class="avatar ${classe}" src="${esc(p.photo_url)}" alt="" width="${FOTO_LADO}" height="${FOTO_LADO}">`;
+  }
+  const iniciais = p.name.trim().split(/\s+/).slice(0, 2).map(n => n[0]).join('').toUpperCase();
+  return `<span class="avatar avatar-iniciais ${classe}" aria-hidden="true">${esc(iniciais)}</span>`;
+}
+
+// Recorta a foto em quadrado (priorizando a parte de cima, onde fica o rosto),
+// reduz para 400x400 e converte para WebP, que é bem mais leve
+function prepararFoto(arquivo) {
+  return new Promise((resolve, reject) => {
+    if (!arquivo.type.startsWith('image/')) return reject(new Error('Escolha um arquivo de imagem (JPG, PNG ou WebP).'));
+    const url = URL.createObjectURL(arquivo);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const lado = Math.min(img.width, img.height);
+      const x = (img.width - lado) / 2;
+      const y = img.height > img.width ? (img.height - lado) * 0.15 : 0;
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = FOTO_LADO;
+      canvas.getContext('2d').drawImage(img, x, y, lado, lado, 0, 0, FOTO_LADO, FOTO_LADO);
+      canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error('Não foi possível ler essa imagem.'))), 'image/webp', 0.82);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Não foi possível ler essa imagem.')); };
+    img.src = url;
+  });
+}
+
+// Envia a foto para o Storage do Supabase e devolve o endereço público
+async function enviarFoto(arquivo) {
+  const foto = await prepararFoto(arquivo);
+  const caminho = `${crypto.randomUUID()}.webp`;
+  const { error } = await sb.storage.from('profissionais').upload(caminho, foto, { contentType: 'image/webp' });
+  if (error) throw error;
+  return sb.storage.from('profissionais').getPublicUrl(caminho).data.publicUrl;
+}
+
 /* ---------------- Sessão ---------------- */
 
 async function iniciarSessao() {
@@ -116,6 +160,8 @@ function mensagemDeErro(error) {
   if (/password should be at least/i.test(msg)) return 'A senha precisa ter pelo menos 6 caracteres.';
   if (/rate limit|too many/i.test(msg)) return 'Muitas tentativas. Espere um pouco e tente de novo.';
   if (/failed to fetch|network/i.test(msg)) return 'Sem conexão com o servidor. Verifique sua internet.';
+  if (/bucket not found|photo_url/i.test(msg)) return 'Falta rodar o arquivo supabase/fotos-profissionais.sql no Supabase.';
+  if (/exceeded the maximum allowed size|payload too large/i.test(msg)) return 'Essa foto é grande demais. Tente outra.';
   return msg;
 }
 
@@ -605,8 +651,9 @@ function telaAgendar(user) {
     <h2>2. Profissional</h2>
     <div class="choices">
       ${profs.length ? profs.map(p => `
-        <button type="button" class="choice ${escolha.professionalId === p.id ? 'selected' : ''}" data-campo="professionalId" data-valor="${p.id}">
-          ✂ ${esc(p.name)}
+        <button type="button" class="choice choice-prof ${escolha.professionalId === p.id ? 'selected' : ''}" data-campo="professionalId" data-valor="${p.id}">
+          ${avatarProf(p)}
+          <span>${esc(p.name)}</span>
         </button>`).join('') : '<p class="sub">Nenhum profissional disponível no momento.</p>'}
     </div>
 
@@ -773,35 +820,95 @@ async function salvarAdm(btn, operacao, sucesso) {
 function telaProfissionais() {
   app.innerHTML = `
     <h1>Profissionais</h1>
-    <p class="sub">Os clientes escolhem entre os profissionais ativos.</p>
-    <form class="card row" id="form-prof">
+    <p class="sub">Os clientes escolhem entre os profissionais ativos, vendo a foto de cada um.</p>
+    <form class="card novo-prof" id="form-prof">
+      <input id="prof-foto" type="file" accept="image/jpeg,image/png,image/webp" class="visually-hidden">
+      <label class="foto-upload" for="prof-foto">
+        <span class="avatar avatar-iniciais" id="prof-preview">Foto</span>
+        <span class="btn secondary small">Anexar foto</span>
+      </label>
       <div class="grow"><label for="prof-nome">Novo profissional</label><input id="prof-nome" placeholder="Nome" required></div>
-      <button class="btn" style="align-self:flex-end">Adicionar</button>
+      <button class="btn">Adicionar</button>
     </form>
     <h2>Equipe</h2>
     <div class="card">
       <table class="table">
-        <thead><tr><th>Nome</th><th>Situação</th><th></th></tr></thead>
+        <thead><tr><th>Profissional</th><th>Situação</th><th></th></tr></thead>
         <tbody>
           ${db.professionals.map(p => `
             <tr>
-              <td>${esc(p.name)}</td>
+              <td><div class="prof-linha">${avatarProf(p, 'avatar-p')}<span>${esc(p.name)}</span></div></td>
               <td><span class="status ${p.active ? 'st-confirmed' : 'st-cancelled'}">${p.active ? 'Ativo' : 'Inativo'}</span></td>
-              <td style="text-align:right"><button class="btn secondary small" data-toggle="${p.id}">${p.active ? 'Desativar' : 'Ativar'}</button></td>
+              <td style="text-align:right">
+                <div class="row" style="justify-content:flex-end">
+                  <input id="foto-${p.id}" type="file" accept="image/jpeg,image/png,image/webp" class="visually-hidden" data-foto="${p.id}">
+                  <label class="btn secondary small" for="foto-${p.id}">${p.photo_url ? 'Trocar foto' : 'Anexar foto'}</label>
+                  <button class="btn secondary small" data-toggle="${p.id}">${p.active ? 'Desativar' : 'Ativar'}</button>
+                </div>
+              </td>
             </tr>`).join('')}
         </tbody>
       </table>
     </div>`;
 
+  // Mostra a foto escolhida antes de salvar
+  const inputFoto = document.getElementById('prof-foto');
+  inputFoto.onchange = () => {
+    const arquivo = inputFoto.files[0];
+    const antiga = document.getElementById('prof-preview');
+    if (!arquivo) return;
+    const img = document.createElement('img');
+    img.className = 'avatar';
+    img.id = 'prof-preview';
+    img.alt = '';
+    img.src = URL.createObjectURL(arquivo);
+    antiga.replaceWith(img);
+  };
+
   const form = document.getElementById('form-prof');
   form.onsubmit = e => {
     e.preventDefault();
     const nome = document.getElementById('prof-nome').value.trim();
+    const arquivo = inputFoto.files[0];
     if (!nome) return;
-    salvarAdm(form.querySelector('button'),
-      () => sb.from('professionals').insert({ name: nome }),
-      `${nome} foi adicionado(a) à equipe.`);
+    if (!arquivo) { toast('Anexe a foto do profissional.', true); return; }
+    comBotaoOcupado(form.querySelector('button'), async () => {
+      try {
+        const photo_url = await enviarFoto(arquivo);
+        const { error } = await sb.from('professionals').insert({ name: nome, photo_url });
+        if (error) throw error;
+      } catch (err) {
+        toast(mensagemDeErro(err), true);
+        return;
+      }
+      toast(`${nome} foi adicionado(a) à equipe.`);
+      await carregarDados();
+      render();
+    });
   };
+
+  // Trocar a foto de quem já está na equipe
+  app.querySelectorAll('[data-foto]').forEach(input => {
+    input.onchange = async () => {
+      const arquivo = input.files[0];
+      if (!arquivo) return;
+      const rotulo = app.querySelector(`label[for="${input.id}"]`);
+      rotulo.textContent = 'Enviando…';
+      try {
+        const photo_url = await enviarFoto(arquivo);
+        const { error } = await sb.from('professionals').update({ photo_url }).eq('id', input.dataset.foto);
+        if (error) throw error;
+      } catch (err) {
+        toast(mensagemDeErro(err), true);
+        render();
+        return;
+      }
+      toast('Foto atualizada.');
+      await carregarDados();
+      render();
+    };
+  });
+
   app.querySelectorAll('[data-toggle]').forEach(btn => {
     btn.onclick = () => {
       const p = porId('professionals', btn.dataset.toggle);

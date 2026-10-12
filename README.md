@@ -21,7 +21,8 @@ O site é publicado na Vercel (https://barbearia-do-caio.vercel.app/): cada envi
 atualiza o site sozinho em cerca de 1 minuto.
 5. (Opcional) Em **Authentication → Sign In / Providers → Email**, desligue **Confirm email** se não
    quiser que o cliente precise confirmar o e-mail antes do primeiro login.
-6. Crie a conta do Caio pelo site (**Criar conta**) e depois rode `supabase/tornar-admin.sql`
+6. Rode também `supabase/fotos-profissionais.sql` no SQL Editor (fotos dos profissionais).
+7. Crie a conta do Caio pelo site (**Criar conta**) e depois rode `supabase/tornar-admin.sql`
    (trocando o e-mail) no SQL Editor. Saia e entre de novo: o painel do ADM aparece.
 
 ### Trocar o e-mail do ADM
