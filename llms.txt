@@ -1,22 +1,22 @@
 # Barbearia do Caio
 
-> Barbearia com agendamento online. O cliente cria uma conta, escolhe um ou mais serviços, o profissional, o dia e o horário, e envia o pedido. A barbearia confirma ou recusa o pedido, e o cliente é avisado. O pagamento é feito no dia do atendimento, direto na barbearia.
+> Barbearia em Carapicuíba - SP com agendamento online. O cliente cria uma conta, escolhe um ou mais serviços, o profissional, o dia e o horário, e envia o pedido. A barbearia confirma ou recusa, e o cliente é avisado. O pagamento é feito no dia do atendimento, direto na barbearia.
 
-## Informações
+Endereço: Av. Perimetral Sudoeste, Carapicuíba - SP. Telefone e WhatsApp: +55 11 91775-7701.
 
-- Site e agendamento: https://barbearia-do-caio.vercel.app/
-- Endereço: Av. Perimetral Sudoeste, Carapicuíba - SP
-- WhatsApp: +55 11 91775-7701 (https://wa.me/5511917757701)
-- Horário: segunda a sábado, das 09:00 às 19:00. Fechado aos domingos.
-- Agendamentos: para os próximos 14 dias, em horários de 30 em 30 minutos.
-- Pagamento: no dia do atendimento, no local.
+Horário de funcionamento: segunda a sábado, das 09:00 às 19:00. Fechado aos domingos. Os agendamentos são feitos para os próximos 14 dias, em horários de 30 em 30 minutos.
 
-## Serviços
+Serviços: Corte (1 hora), Penteado (1 hora), Freestyle (1 hora), Barba (30 minutos) e Sobrancelha (30 minutos). Vários serviços podem ser agendados juntos: somente barba e/ou sobrancelha leva 30 minutos; com qualquer outro serviço, 1 hora. Os preços atualizados aparecem no site depois do login.
 
-- Corte (1 hora)
-- Penteado (1 hora)
-- Freestyle (1 hora)
-- Barba (30 minutos)
-- Sobrancelha (30 minutos)
+## Agendamento
 
-Vários serviços podem ser agendados juntos. Somente barba e/ou sobrancelha: 30 minutos. Com qualquer outro serviço: 1 hora. Preços atualizados aparecem no site depois do login.
+- [Site e agendamento online](https://barbearia-do-caio.vercel.app/): criar conta, entrar e agendar um horário
+- [Criar conta](https://barbearia-do-caio.vercel.app/#/cadastro): cadastro de cliente com nome, telefone, e-mail e senha
+
+## Contato
+
+- [WhatsApp da barbearia](https://wa.me/5511917757701): tirar dúvidas e falar direto com a barbearia
+
+## Optional
+
+- [Mapa do site](https://barbearia-do-caio.vercel.app/sitemap.xml): lista de páginas para robôs de busca
