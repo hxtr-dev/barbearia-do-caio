@@ -5,7 +5,7 @@
 ## Informações
 
 - Site e agendamento: https://barbearia-do-caio.vercel.app/
-- Endereço: Av. Perimetral Sudoeste
+- Endereço: Av. Perimetral Sudoeste, Carapicuíba - SP
 - WhatsApp: +55 11 91775-7701 (https://wa.me/5511917757701)
 - Horário: segunda a sábado, das 09:00 às 19:00. Fechado aos domingos.
 - Agendamentos: para os próximos 14 dias, em horários de 30 em 30 minutos.
