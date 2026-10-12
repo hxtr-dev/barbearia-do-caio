@@ -1,0 +1,5 @@
+# Robôs de busca podem ler todo o site
+User-agent: *
+Allow: /
+
+Sitemap: https://barbearia-do-caio.vercel.app/sitemap.xml

@@ -3,17 +3,83 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Barbearia do Caio</title>
+  <title>Barbearia do Caio | Agende seu corte online</title>
+  <meta name="description" content="Barbearia do Caio: corte, barba, sobrancelha, penteado e freestyle. Escolha o profissional, o dia e o horário e agende online. Pagamento no dia, direto na barbearia.">
+  <meta name="theme-color" content="#15120d">
+  <!-- Se o site mudar de endereço (ex.: domínio próprio), troque o endereço aqui, nas tags og: e em sitemap.xml/robots.txt/llms.txt -->
+  <link rel="canonical" href="https://barbearia-do-caio.vercel.app/">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="sitemap" type="application/xml" href="sitemap.xml">
+  <!-- Google Search Console: cole aqui a tag de verificação quando o Google pedir -->
+
+  <!-- Prévia do link no WhatsApp, Instagram, Facebook etc. -->
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="pt_BR">
+  <meta property="og:site_name" content="Barbearia do Caio">
+  <meta property="og:title" content="Barbearia do Caio | Agende seu corte online">
+  <meta property="og:description" content="Corte, barba, sobrancelha e mais. Agende seu horário online e pague no dia, na barbearia.">
+  <meta property="og:url" content="https://barbearia-do-caio.vercel.app/">
+  <meta property="og:image" content="https://barbearia-do-caio.vercel.app/caio.jpeg">
+  <meta property="og:image:width" content="1164">
+  <meta property="og:image:height" content="1552">
+  <meta property="og:image:alt" content="Caio, da Barbearia do Caio">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <!-- Ficha da barbearia para o Google (dados estruturados) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BarberShop",
+    "name": "Barbearia do Caio",
+    "url": "https://barbearia-do-caio.vercel.app/",
+    "image": "https://barbearia-do-caio.vercel.app/caio.jpeg",
+    "description": "Barbearia com agendamento online: corte, barba, sobrancelha, penteado e freestyle. Pagamento no dia do atendimento.",
+    "telephone": "+55 11 91775-7701",
+    "address": {
+      "@type": "PostalAddress",
+      "streetAddress": "Av. Perimetral Sudoeste",
+      "addressCountry": "BR"
+    },
+    "priceRange": "$",
+    "paymentAccepted": "Pagamento no local",
+    "openingHoursSpecification": [{
+      "@type": "OpeningHoursSpecification",
+      "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+      "opens": "09:00",
+      "closes": "19:00"
+    }],
+    "hasOfferCatalog": {
+      "@type": "OfferCatalog",
+      "name": "Serviços",
+      "itemListElement": [
+        { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Corte" } },
+        { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Barba" } },
+        { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Sobrancelha" } },
+        { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Penteado" } },
+        { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Freestyle" } }
+      ]
+    }
+  }
+  </script>
+
+  <link rel="preconnect" href="https://kyfxtrrbmpdakrxohxby.supabase.co" crossorigin>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preload" as="image" href="caio.webp" type="image/webp">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header id="topbar" class="topbar hidden"></header>
-  <main id="app" class="container"></main>
+  <main id="app" class="container">
+    <noscript>
+      <h1>Barbearia do Caio</h1>
+      <p>Agende corte, barba, sobrancelha, penteado e freestyle online. Ative o JavaScript do navegador para usar o agendamento, ou fale com a gente pelo WhatsApp.</p>
+    </noscript>
+  </main>
   <div id="toasts" class="toasts"></div>
   <a class="whatsapp-link" href="https://wa.me/5511917757701" target="_blank" rel="noopener noreferrer" aria-label="Conversar com a Barbearia do Caio pelo WhatsApp">WhatsApp</a>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
+  <script defer src="config.js"></script>
+  <script defer src="analytics.js"></script>
+  <script defer src="app.js"></script>
 </body>
 </html>
-

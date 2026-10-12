@@ -9,4 +9,7 @@
 window.BARBEARIA_CONFIG = {
   supabaseUrl: 'https://kyfxtrrbmpdakrxohxby.supabase.co',
   supabaseKey: 'sb_publishable_XoNU2R2st64lgZQQniTGeQ_pR8BA3Vv',
+
+  // Google Analytics: cole o "ID da métrica" (começa com G-). Vazio = desligado.
+  googleAnalyticsId: '',
 };

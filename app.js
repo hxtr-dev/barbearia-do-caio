@@ -272,7 +272,7 @@ async function recarregarEmSegundoPlano() {
 
 function desenharTopo(user, rota) {
   const topo = document.getElementById('topbar');
-  if (!user) { topo.classList.add('hidden'); document.title = 'Barbearia do Caio'; return; }
+  if (!user) { topo.classList.add('hidden'); document.title = 'Barbearia do Caio | Agende seu corte online'; return; }
   topo.classList.remove('hidden');
 
   const link = (href, texto, extra = '') =>

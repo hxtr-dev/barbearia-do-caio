@@ -14,12 +14,23 @@ veem a mesma agenda em qualquer aparelho, e o ADM recebe os pedidos na hora.
 
    Cole os dois em `config.js`. Nunca use a chave *secret* / *service_role* no site.
 4. Em **Authentication → URL Configuration**, coloque em **Site URL**:
-   `https://hxtr-dev.github.io/barbearia-do-caio/`
+   `https://barbearia-do-caio.vercel.app/`
    e em **Redirect URLs** adicione também `http://localhost:8001/`.
+
+O site é publicado na Vercel (https://barbearia-do-caio.vercel.app/): cada envio para o GitHub
+atualiza o site sozinho em cerca de 1 minuto.
 5. (Opcional) Em **Authentication → Sign In / Providers → Email**, desligue **Confirm email** se não
    quiser que o cliente precise confirmar o e-mail antes do primeiro login.
 6. Crie a conta do Caio pelo site (**Criar conta**) e depois rode `supabase/tornar-admin.sql`
    (trocando o e-mail) no SQL Editor. Saia e entre de novo: o painel do ADM aparece.
+
+### Trocar o e-mail do ADM
+
+1. Crie uma conta com o e-mail novo pelo site (**Criar conta**).
+2. Abra `supabase/trocar-admin.sql`, troque `EMAIL_NOVO` e `EMAIL_ANTIGO` e rode no SQL Editor.
+3. Entre no site com o e-mail novo. O e-mail antigo continua existindo, mas como cliente.
+   Para apagá-lo: **Authentication → Users** → `⋯` ao lado dele → **Delete user**
+   (isso também apaga os agendamentos feitos por essa conta).
 
 ## Executar localmente
 
@@ -58,5 +69,11 @@ As regras ficam no banco (`supabase/schema.sql`), não no site:
 - `config.js`: endereço e chave pública do projeto Supabase.
 - `supabase/schema.sql`: tabelas, regras de segurança, tempo real e dados iniciais.
 - `supabase/tornar-admin.sql`: transforma uma conta em ADM.
-- `caio.jpeg`: imagem de fundo.
+- `analytics.js`: Google Analytics, carregado só depois que o visitante aceita os cookies (LGPD).
+- `robots.txt`, `sitemap.xml`, `llms.txt`: arquivos para Google e robôs de IA lerem o site.
+- `favicon.svg`: ícone da aba do navegador.
+- `caio.jpeg` / `caio.webp`: imagem de fundo (a WebP é a versão leve).
+
+Se o site mudar de endereço (domínio próprio), troque o endereço em `index.html`, `robots.txt`,
+`sitemap.xml` e `llms.txt`.
 - `iniciar-site.bat`: inicialização local no Windows.
