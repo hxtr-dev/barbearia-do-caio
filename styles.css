@@ -438,6 +438,11 @@ input[type="file"]:focus-visible + .foto-upload .btn { outline: 2px solid var(--
   border: 0;
 }
 
+/* Bloqueios de horário */
+label.check { display: flex; align-items: center; gap: 10px; font-weight: 600; cursor: pointer; margin: 0; }
+label.check input { width: 20px; height: 20px; accent-color: var(--primary); }
+.bloqueio-card { border-style: dashed; background: rgba(48, 41, 30, .9); }
+
 /* Botão e janela de aviso pelo WhatsApp */
 .btn-whats, .btn-whats:hover { background: #25d366; color: #0b2e17; }
 .btn-whats:hover { background: #3be07a; }

@@ -27,7 +27,7 @@ const sb = configurado ? window.supabase.createClient(cfg.supabaseUrl, cfg.supab
 // Usuário logado: { id, email, name, phone, role } ou null
 let sessao = null;
 // Cópia local dos dados que o usuário pode ver
-let db = { professionals: [], services: [], appointments: [], notifications: [] };
+let db = { professionals: [], services: [], appointments: [], notifications: [], blocks: [] };
 // Horários ocupados por dia (de todos os clientes, sem nomes): { '2026-10-09': [...] }
 let ocupadosPorDia = {};
 
@@ -55,7 +55,7 @@ async function carregarDados() {
   const desde = new Date();
   desde.setDate(desde.getDate() - 60);
 
-  const [profs, servs, appts, avisos] = await Promise.all([
+  const [profs, servs, appts, avisos, bloqs] = await Promise.all([
     sb.from('professionals').select('*').order('created_at'),
     sb.from('services').select('*').order('created_at'),
     ehAdmin
@@ -64,6 +64,9 @@ async function carregarDados() {
     ehAdmin
       ? Promise.resolve({ data: [] })
       : sb.from('notifications').select('*').eq('user_id', sessao.id).order('created_at', { ascending: false }).limit(20),
+    ehAdmin
+      ? sb.from('blocks').select('*').or(`repeat_daily.eq.true,date.gte.${hojeISO()}`).order('date').order('start_time')
+      : Promise.resolve({ data: [] }),
   ]);
   for (const r of [profs, servs, appts, avisos]) if (r.error) throw r.error;
 
@@ -71,15 +74,19 @@ async function carregarDados() {
   db.services = servs.data.map(s => ({ ...s, price: Number(s.price) }));
   db.appointments = appts.data.map(linhaParaAgendamento);
   db.notifications = avisos.data;
+  // Se a tabela de bloqueios ainda não foi criada no Supabase, o resto do painel continua funcionando
+  db.blocks = bloqs.error ? [] : bloqs.data.map(b => ({ ...b, start: b.start_time.slice(0, 5), end: b.end_time.slice(0, 5) }));
+  db.blocksIndisponivel = Boolean(bloqs.error);
 }
 
 async function buscarOcupados(data) {
   const { data: linhas, error } = await sb.rpc('horarios_ocupados', { p_data: data });
   if (error) throw error;
   ocupadosPorDia[data] = linhas.map(o => ({
-    professionalId: o.professional_id,
+    professionalId: o.professional_id, // vazio = bloqueio de todos os profissionais
     ini: paraMin(o.start_time.slice(0, 5)),
     fim: paraMin(o.end_time.slice(0, 5)),
+    bloqueio: o.tipo === 'bloqueio',
   }));
 }
 
@@ -144,7 +151,7 @@ async function sair() {
   if (canal) { sb.removeChannel(canal); canal = null; }
   await sb.auth.signOut();
   sessao = null;
-  db = { professionals: [], services: [], appointments: [], notifications: [] };
+  db = { professionals: [], services: [], appointments: [], notifications: [], blocks: [] };
   ocupadosPorDia = {};
   location.hash = '#/login';
   render();
@@ -228,14 +235,16 @@ function horariosDoDia(data, profissionalId, duracao) {
   const fecha = paraMin(HORARIO.fecha);
   const agora = new Date();
   const minAgora = data === hojeISO() ? agora.getHours() * 60 + agora.getMinutes() : -1;
-  const ocupados = (ocupadosPorDia[data] || []).filter(o => o.professionalId === profissionalId);
+  const ocupados = (ocupadosPorDia[data] || []).filter(o => !o.professionalId || o.professionalId === profissionalId);
 
   const slots = [];
   for (let ini = abre; ini + duracao <= fecha; ini += HORARIO.intervalo) {
     const fim = ini + duracao;
+    const choques = ocupados.filter(o => ini < o.fim && fim > o.ini);
     let situacao = 'livre';
     if (ini <= minAgora) situacao = 'passado';
-    else if (ocupados.some(o => ini < o.fim && fim > o.ini)) situacao = 'ocupado';
+    else if (choques.some(o => o.bloqueio)) situacao = 'bloqueado'; // almoço, descanso etc. (sem mostrar o motivo)
+    else if (choques.length) situacao = 'ocupado';
     slots.push({ hora: paraHora(ini), situacao });
   }
   return slots;
@@ -332,6 +341,7 @@ function desenharTopo(user, rota) {
       <span class="brand">Barbearia do Caio · ADM</span>
       ${link('pedidos', 'Pedidos', badge(pendentes))}
       ${link('agenda', 'Agenda')}
+      ${link('bloqueios', 'Bloqueios')}
       ${link('profissionais', 'Profissionais')}
       ${link('servicos', 'Serviços')}
       <button class="link" id="btn-sair">Sair</button>`;
@@ -681,9 +691,9 @@ function telaAgendar(user) {
       blocoHorarios = `
         <div class="choices">
           ${slots.map(s => `
-            <button type="button" class="choice slot ${s.situacao === 'ocupado' ? 'busy' : ''} ${s.situacao === 'passado' ? 'past' : ''} ${escolha.start === s.hora ? 'selected' : ''}"
+            <button type="button" class="choice slot ${s.situacao === 'ocupado' ? 'busy' : ''} ${['passado', 'bloqueado'].includes(s.situacao) ? 'past' : ''} ${escolha.start === s.hora ? 'selected' : ''}"
               data-campo="start" data-valor="${s.hora}" ${s.situacao !== 'livre' ? 'disabled' : ''}>
-              ${s.hora}${s.situacao === 'ocupado' ? '<small>Ocupado</small>' : ''}
+              ${s.hora}${s.situacao === 'ocupado' ? '<small>Ocupado</small>' : ''}${s.situacao === 'bloqueado' ? '<small>Indisponível</small>' : ''}
             </button>`).join('')}
         </div>
         <div class="legend"><span class="l-free">Livre</span><span class="l-busy">Ocupado por outro cliente</span><span class="l-past">Indisponível</span></div>`;
@@ -841,6 +851,8 @@ function telaAgenda() {
   const profs = db.professionals;
   const doDia = ordenarAppts(db.appointments.filter(a =>
     a.date === agendaData && ATIVOS.includes(a.status) && (agendaProf === 'todos' || a.professionalId === agendaProf)));
+  const bloqsDoDia = bloqueiosDoDia(agendaData)
+    .filter(b => agendaProf === 'todos' || !b.professional_id || b.professional_id === agendaProf);
 
   app.innerHTML = `
     <h1>Agenda</h1>
@@ -854,6 +866,9 @@ function telaAgenda() {
         </select>
       </div>
     </div>
+    ${bloqsDoDia.length ? `
+      <h2>Horários bloqueados</h2>
+      <div class="stack">${bloqsDoDia.map(b => cartaoBloqueio(b)).join('')}</div>` : ''}
     <h2>Atendimentos (${doDia.length})</h2>
     <div class="stack">${doDia.length ? doDia.map(a => cartaoAppt(a, { paraAdmin: true })).join('') : '<div class="card empty">Nenhum atendimento neste dia.</div>'}</div>`;
 
@@ -870,6 +885,135 @@ async function salvarAdm(btn, operacao, sucesso) {
     if (sucesso) toast(sucesso);
     await carregarDados();
     render();
+  });
+}
+
+/* ---------- ADM: Bloqueios (almoço, descanso, imprevisto) ---------- */
+const MOTIVOS_BLOQUEIO = ['Almoço', 'Descanso', 'Imprevisto', 'Outro'];
+
+// Bloqueios que valem num dia: os daquele dia e os diários que já começaram
+function bloqueiosDoDia(data) {
+  return (db.blocks || [])
+    .filter(b => (!b.repeat_daily && b.date === data) || (b.repeat_daily && b.date <= data))
+    .sort((a, b) => a.start.localeCompare(b.start));
+}
+
+function nomeProfBloqueio(b) {
+  return b.professional_id ? (porId('professionals', b.professional_id)?.name || '—') : 'Todos os profissionais';
+}
+
+function cartaoBloqueio(b, { comRemover = false } = {}) {
+  const quando = b.repeat_daily
+    ? `Todos os dias, a partir de ${dataCurta(b.date).dia}`
+    : dataBonita(b.date);
+  return `
+    <div class="card appt bloqueio-card">
+      <div class="info">
+        <strong>${esc(b.reason)} · ${b.start} às ${b.end}</strong>
+        <div class="meta">${esc(quando)} · ${esc(nomeProfBloqueio(b))}</div>
+      </div>
+      <span class="status st-cancelled">${b.repeat_daily ? 'Diário' : 'Bloqueado'}</span>
+      ${comRemover ? `<div class="row actions"><button class="btn secondary small" data-remover="${b.id}">Remover</button></div>` : ''}
+    </div>`;
+}
+
+// Horários de 30 em 30 minutos dentro do funcionamento
+function opcoesDeHorario(inicio, fim, selecionado) {
+  const opcoes = [];
+  for (let m = paraMin(inicio); m <= paraMin(fim); m += HORARIO.intervalo) {
+    const h = paraHora(m);
+    opcoes.push(`<option value="${h}" ${h === selecionado ? 'selected' : ''}>${h}</option>`);
+  }
+  return opcoes.join('');
+}
+
+function telaBloqueios() {
+  if (db.blocksIndisponivel) {
+    app.innerHTML = `
+      <h1>Bloqueios</h1>
+      <div class="card stack">
+        <strong>Falta um passo no banco de dados.</strong>
+        <p class="sub" style="margin:0">Rode o arquivo <code>supabase/bloqueios.sql</code> no SQL Editor do Supabase e recarregue a página.</p>
+      </div>`;
+    return;
+  }
+
+  const profs = db.professionals.filter(p => p.active);
+  const diarios = db.blocks.filter(b => b.repeat_daily);
+  const avulsos = db.blocks.filter(b => !b.repeat_daily && b.date >= hojeISO());
+  const fimMenos30 = paraHora(paraMin(HORARIO.fecha) - HORARIO.intervalo);
+  const inicioMais30 = paraHora(paraMin(HORARIO.abre) + HORARIO.intervalo);
+
+  app.innerHTML = `
+    <h1>Bloqueios</h1>
+    <p class="sub">Feche horários para almoço, descanso ou imprevistos. Os clientes veem esses horários como "Indisponível".</p>
+
+    <form class="card stack" id="form-bloqueio">
+      <div class="row">
+        <div class="grow"><label for="bl-prof">Profissional</label>
+          <select id="bl-prof">
+            <option value="">Todos os profissionais</option>
+            ${profs.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="grow"><label for="bl-motivo">Motivo</label>
+          <select id="bl-motivo">${MOTIVOS_BLOQUEIO.map(m => `<option>${m}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="grow"><label for="bl-dia">Dia</label><input type="date" id="bl-dia" value="${hojeISO()}" min="${hojeISO()}" required></div>
+        <div class="grow"><label for="bl-ini">Das</label><select id="bl-ini">${opcoesDeHorario(HORARIO.abre, fimMenos30, '12:00')}</select></div>
+        <div class="grow"><label for="bl-fim">Até</label><select id="bl-fim">${opcoesDeHorario(inicioMais30, HORARIO.fecha, '13:00')}</select></div>
+      </div>
+      <label class="check"><input type="checkbox" id="bl-diario"> Repetir todos os dias (ex.: almoço fixo)</label>
+      <div class="error" id="bl-erro"></div>
+      <button class="btn">Bloquear horário</button>
+    </form>
+
+    <h2>Todos os dias</h2>
+    <div class="stack">${diarios.length ? diarios.map(b => cartaoBloqueio(b, { comRemover: true })).join('') : '<div class="card empty">Nenhum bloqueio diário.</div>'}</div>
+
+    <h2>Dias específicos</h2>
+    <div class="stack">${avulsos.length ? avulsos.map(b => cartaoBloqueio(b, { comRemover: true })).join('') : '<div class="card empty">Nenhum bloqueio marcado.</div>'}</div>`;
+
+  const form = document.getElementById('form-bloqueio');
+  form.onsubmit = e => {
+    e.preventDefault();
+    const erro = document.getElementById('bl-erro');
+    erro.textContent = '';
+    const novo = {
+      professional_id: document.getElementById('bl-prof').value || null,
+      reason: document.getElementById('bl-motivo').value,
+      date: document.getElementById('bl-dia').value,
+      start_time: document.getElementById('bl-ini').value,
+      end_time: document.getElementById('bl-fim').value,
+      repeat_daily: document.getElementById('bl-diario').checked,
+    };
+    if (!novo.date || novo.date < hojeISO()) { erro.textContent = 'Escolha um dia a partir de hoje.'; return; }
+    if (paraMin(novo.end_time) <= paraMin(novo.start_time)) { erro.textContent = 'O horário final precisa ser depois do inicial.'; return; }
+
+    // Avisa se já tem cliente marcado nesse período (o bloqueio não cancela pedidos)
+    const conflitos = ordenarAppts(db.appointments.filter(a =>
+      ATIVOS.includes(a.status) && !jaPassou(a)
+      && (!novo.professional_id || a.professionalId === novo.professional_id)
+      && (novo.repeat_daily ? a.date >= novo.date : a.date === novo.date)
+      && paraMin(a.start) < paraMin(novo.end_time)
+      && paraMin(a.start) + a.service.duration > paraMin(novo.start_time)));
+    if (conflitos.length) {
+      const lista = conflitos.slice(0, 5).map(a => `• ${a.cliente?.name || 'Cliente'}, ${dataCurta(a.date).dia} às ${a.start}`).join('\n');
+      const ok = confirm(`Já existe(m) ${conflitos.length} agendamento(s) nesse horário:\n${lista}\n\n`
+        + 'O bloqueio NÃO cancela esses pedidos. Avise os clientes ou recuse os pedidos pendentes.\n\nBloquear mesmo assim?');
+      if (!ok) return;
+    }
+
+    salvarAdm(form.querySelector('button'), () => sb.from('blocks').insert(novo), 'Horário bloqueado.');
+  };
+
+  app.querySelectorAll('[data-remover]').forEach(btn => {
+    btn.onclick = () => {
+      if (!confirm('Remover este bloqueio? O horário volta a ficar livre para os clientes.')) return;
+      salvarAdm(btn, () => sb.from('blocks').delete().eq('id', btn.dataset.remover), 'Bloqueio removido.');
+    };
   });
 }
 
@@ -1024,7 +1168,7 @@ function telaServicos() {
    ========================================================= */
 
 const ROTAS_CLIENTE = { home: telaHome, agendar: telaAgendar, conta: telaConta };
-const ROTAS_ADMIN = { pedidos: telaPedidos, agenda: telaAgenda, profissionais: telaProfissionais, servicos: telaServicos };
+const ROTAS_ADMIN = { pedidos: telaPedidos, agenda: telaAgenda, bloqueios: telaBloqueios, profissionais: telaProfissionais, servicos: telaServicos };
 
 const rotaAtual = () => location.hash.replace('#/', '');
 
