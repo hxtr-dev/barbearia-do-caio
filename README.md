@@ -50,6 +50,8 @@ Acesse http://localhost:8001.
 - Pedidos pendentes reservam o horário; recusas e cancelamentos liberam a agenda.
 - O ADM recebe os pedidos em tempo real (aviso na tela, som e notificação do navegador) e aceita ou recusa.
 - O cliente recebe em tempo real o aviso de confirmado/recusado.
+- Ao aceitar um pedido, o ADM pode avisar o cliente no WhatsApp: o site abre a conversa com a mensagem pronta
+  (o botão "Avisar no WhatsApp" também fica nos cartões confirmados). O cadastro exige WhatsApp com DDD.
 - Administração de profissionais e serviços.
 - Pagamento no local, registrado apenas no dia do atendimento.
 

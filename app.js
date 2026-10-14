@@ -442,7 +442,7 @@ function telaCadastro() {
       <p class="sub">Leva menos de um minuto</p>
       <form class="card stack" id="form-cad">
         <div class="field"><label for="nome">Nome</label><input id="nome" autocomplete="name" required></div>
-        <div class="field"><label for="tel">Telefone</label><input id="tel" type="tel" autocomplete="tel" placeholder="(11) 90000-0000" required></div>
+        <div class="field"><label for="tel">WhatsApp (com DDD)</label><input id="tel" type="tel" autocomplete="tel" placeholder="(11) 90000-0000" required></div>
         <div class="field"><label for="email">E-mail</label><input id="email" type="email" autocomplete="email" required></div>
         <div class="field"><label for="senha">Senha (mín. 6 caracteres)</label><input id="senha" type="password" minlength="6" autocomplete="new-password" required></div>
         <div class="error" id="erro"></div>
@@ -456,6 +456,11 @@ function telaCadastro() {
     e.preventDefault();
     const erro = document.getElementById('erro');
     erro.textContent = '';
+    // O telefone é usado para avisar o cliente no WhatsApp: precisa ter DDD
+    if (!linkWhatsApp(document.getElementById('tel').value, '')) {
+      erro.textContent = 'Informe o WhatsApp com DDD, por exemplo (11) 91234-5678.';
+      return;
+    }
     await comBotaoOcupado(form.querySelector('button'), async () => {
       const { data, error } = await sb.auth.signUp({
         email: document.getElementById('email').value.trim(),
@@ -505,8 +510,13 @@ function cartaoAppt(a, { paraAdmin = false } = {}) {
     if (a.status === 'pending') {
       acoes = `<button class="btn ok small" data-acao="aceitar" data-id="${a.id}">Aceitar</button>
                <button class="btn bad small" data-acao="recusar" data-id="${a.id}">Recusar</button>`;
-    } else if (a.status === 'confirmed' && !a.paid) {
-      acoes = `<button class="btn secondary small" data-acao="pagar" data-id="${a.id}" ${ehHoje ? '' : 'disabled title="O pagamento só pode ser registrado no dia do atendimento"'}>Registrar pagamento</button>`;
+    } else if (a.status === 'confirmed') {
+      if (!a.paid) {
+        acoes = `<button class="btn secondary small" data-acao="pagar" data-id="${a.id}" ${ehHoje ? '' : 'disabled title="O pagamento só pode ser registrado no dia do atendimento"'}>Registrar pagamento</button>`;
+      }
+      // Botão para avisar o cliente no WhatsApp (mensagem já escrita)
+      const whats = !jaPassou(a) && linkWhatsApp(a.cliente?.phone, mensagemConfirmacao(a));
+      if (whats) acoes += `<a class="btn small btn-whats" href="${esc(whats)}" target="_blank" rel="noopener noreferrer">Avisar no WhatsApp</a>`;
     }
   } else if (ATIVOS.includes(a.status) && !jaPassou(a)) {
     acoes = `<button class="btn secondary small" data-acao="cancelar" data-id="${a.id}">Cancelar</button>`;
@@ -535,6 +545,52 @@ function cartaoAppt(a, { paraAdmin = false } = {}) {
     </div>`;
 }
 
+/* ---------- Aviso ao cliente pelo WhatsApp ---------- */
+
+// Monta o link do WhatsApp com a mensagem pronta. Aceita "(11) 91234-5678", "11912345678" ou "+55 11 ...".
+// Devolve null se o número não parecer um celular/telefone brasileiro com DDD.
+function linkWhatsApp(telefone, texto) {
+  let numero = String(telefone || '').replace(/\D/g, '');
+  if (numero.length === 10 || numero.length === 11) numero = '55' + numero;
+  if (!/^55\d{10,11}$/.test(numero)) return null;
+  return `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`;
+}
+
+function mensagemConfirmacao(a) {
+  const nome = (a.cliente?.name || '').trim().split(' ')[0];
+  const prof = porId('professionals', a.professionalId)?.name;
+  return `Olá${nome ? ', ' + nome : ''}! Seu horário na Barbearia do Caio está confirmado: `
+    + `${a.service.name}, ${dataBonita(a.date)}, às ${a.start}${prof ? ', com ' + prof : ''}. `
+    + 'O pagamento é feito no dia, direto na barbearia. Até lá!';
+}
+
+// Depois de aceitar: pergunta se o ADM quer avisar o cliente (abre o WhatsApp com a mensagem pronta)
+function oferecerAvisoWhatsApp(a) {
+  if (!a) return;
+  const nome = (a.cliente?.name || 'o cliente').trim().split(' ')[0];
+  const link = linkWhatsApp(a.cliente?.phone, mensagemConfirmacao(a));
+  if (!link) {
+    toast(`O telefone de ${nome} não parece um WhatsApp válido. Avise por outro meio.`, true);
+    return;
+  }
+  const dialogo = document.createElement('dialog');
+  dialogo.className = 'dialogo';
+  dialogo.innerHTML = `
+    <form method="dialog" class="stack">
+      <strong>Pedido aceito!</strong>
+      <p style="margin:0">Avise ${esc(nome)} pelo WhatsApp. A mensagem já vai escrita, é só tocar em enviar.</p>
+      <p class="meta" style="margin:0">${esc(mensagemConfirmacao(a))}</p>
+      <div class="row">
+        <a class="btn btn-whats" href="${esc(link)}" target="_blank" rel="noopener noreferrer">Avisar no WhatsApp</a>
+        <button class="btn secondary">Agora não</button>
+      </div>
+    </form>`;
+  dialogo.querySelector('a').addEventListener('click', () => dialogo.close());
+  dialogo.addEventListener('close', () => dialogo.remove());
+  document.body.appendChild(dialogo);
+  dialogo.showModal();
+}
+
 // Liga os botões de ação dos cartões (aceitar, recusar, cancelar, pagar)
 function ligarAcoes() {
   app.querySelectorAll('[data-acao]').forEach(btn => {
@@ -553,7 +609,7 @@ function ligarAcoes() {
       };
       const mensagens = {
         cancelar: 'Agendamento cancelado.',
-        aceitar: 'Pedido aceito. O cliente será avisado.',
+        aceitar: 'Pedido aceito.',
         recusar: 'Pedido recusado.',
         pagar: 'Pagamento registrado.',
       };
@@ -565,6 +621,7 @@ function ligarAcoes() {
         ocupadosPorDia = {};
         await carregarDados();
         render();
+        if (acao === 'aceitar') oferecerAvisoWhatsApp(porId('appointments', id));
       });
     };
   });
