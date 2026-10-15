@@ -438,6 +438,10 @@ input[type="file"]:focus-visible + .foto-upload .btn { outline: 2px solid var(--
   border: 0;
 }
 
+/* Link discreto para a área do barbeiro, no fim da página inicial */
+.rodape { text-align: center; margin-top: 40px; font-size: 13px; }
+.rodape a { color: var(--muted); }
+
 /* Bloqueios de horário */
 label.check { display: flex; align-items: center; gap: 10px; font-weight: 600; cursor: pointer; margin: 0; }
 label.check input { width: 20px; height: 20px; accent-color: var(--primary); }

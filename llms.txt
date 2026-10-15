@@ -1,17 +1,17 @@
 # Barbearia do Caio
 
-> Barbearia em Carapicuíba - SP com agendamento online. O cliente cria uma conta, escolhe um ou mais serviços, o profissional, o dia e o horário, e envia o pedido. A barbearia confirma ou recusa, e o cliente é avisado. O pagamento é feito no dia do atendimento, direto na barbearia.
+> Barbearia em Carapicuíba - SP com agendamento online. Sem cadastro: o cliente escolhe um ou mais serviços, o profissional, o dia e o horário, informa nome e WhatsApp e envia o pedido. A barbearia confirma ou recusa, e o cliente é avisado pelo WhatsApp. O pagamento é feito no dia do atendimento, direto na barbearia.
 
 Endereço: Av. Perimetral Sudoeste, Carapicuíba - SP. Telefone e WhatsApp: +55 11 98768-5870.
 
 Horário de funcionamento: segunda a sábado, das 09:00 às 19:00. Fechado aos domingos. Os agendamentos são feitos para os próximos 14 dias, em horários de 30 em 30 minutos.
 
-Serviços: Corte (1 hora), Penteado (1 hora), Freestyle (1 hora), Barba (30 minutos) e Sobrancelha (30 minutos). Vários serviços podem ser agendados juntos: somente barba e/ou sobrancelha leva 30 minutos; com qualquer outro serviço, 1 hora. Os preços atualizados aparecem no site depois do login.
+Serviços: Corte (1 hora), Penteado (1 hora), Freestyle (1 hora), Barba (30 minutos) e Sobrancelha (30 minutos). Vários serviços podem ser agendados juntos: somente barba e/ou sobrancelha leva 30 minutos; com qualquer outro serviço, 1 hora. Os preços atualizados aparecem na página inicial do site.
 
 ## Agendamento
 
-- [Site e agendamento online](https://barbearia-do-caio.vercel.app/): criar conta, entrar e agendar um horário
-- [Criar conta](https://barbearia-do-caio.vercel.app/#/cadastro): cadastro de cliente com nome, telefone, e-mail e senha
+- [Site e agendamento online](https://barbearia-do-caio.vercel.app/): serviços, preços e agendamento sem cadastro
+- [Agendar horário](https://barbearia-do-caio.vercel.app/#/agendar): escolher serviço, profissional, dia e horário e informar nome e WhatsApp
 
 ## Contato
 

@@ -21,8 +21,9 @@ O site é publicado na Vercel (https://barbearia-do-caio.vercel.app/): cada envi
 atualiza o site sozinho em cerca de 1 minuto.
 5. (Opcional) Em **Authentication → Sign In / Providers → Email**, desligue **Confirm email** se não
    quiser que o cliente precise confirmar o e-mail antes do primeiro login.
-6. Rode também `supabase/fotos-profissionais.sql` (fotos dos profissionais) e `supabase/bloqueios.sql`
-   (bloqueio de horários) no SQL Editor.
+6. Rode também `supabase/fotos-profissionais.sql` (fotos dos profissionais), `supabase/bloqueios.sql`
+   (bloqueio de horários) e `supabase/sem-login.sql` (agendamento sem cadastro) no SQL Editor.
+   Depois, em **Authentication → Sign In / Providers**, ligue **Allow anonymous sign-ins**.
 7. Crie a conta do Caio pelo site (**Criar conta**) e depois rode `supabase/tornar-admin.sql`
    (trocando o e-mail) no SQL Editor. Saia e entre de novo: o painel do ADM aparece.
 
@@ -46,13 +47,16 @@ Acesse http://localhost:8001.
 
 ## Funcionalidades
 
-- Cadastro e login de clientes por e-mail e senha (Supabase Auth).
+- Agendamento sem cadastro: o cliente informa só nome e WhatsApp ao enviar o pedido. O site cria um acesso
+  anônimo guardado no aparelho, para ele ver e cancelar os próprios horários em "Meus horários".
+- Só o barbeiro (ADM) entra com e-mail e senha, pelo link "Área do barbeiro" (endereço #/admin).
 - Escolha de um ou mais serviços, profissional, dia e horário; horários de outros clientes aparecem como ocupados.
 - Pedidos pendentes reservam o horário; recusas e cancelamentos liberam a agenda.
 - O ADM recebe os pedidos em tempo real (aviso na tela, som e notificação do navegador) e aceita ou recusa.
 - O cliente recebe em tempo real o aviso de confirmado/recusado.
-- Ao aceitar um pedido, o ADM pode avisar o cliente no WhatsApp: o site abre a conversa com a mensagem pronta
-  (o botão "Avisar no WhatsApp" também fica nos cartões confirmados). O cadastro exige WhatsApp com DDD.
+- Ao aceitar ou recusar um pedido, o ADM pode avisar o cliente no WhatsApp: o site abre a conversa com a mensagem pronta
+  (o botão "Avisar no WhatsApp" também fica nos cartões confirmados e recusados). O pedido exige WhatsApp com DDD,
+  e cada WhatsApp ou aparelho pode ter no máximo 3 pedidos aguardando resposta.
 - Administração de profissionais e serviços.
 - Pagamento no local, registrado apenas no dia do atendimento.
 

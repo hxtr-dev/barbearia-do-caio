@@ -46,23 +46,28 @@ function linhaParaAgendamento(r) {
     status: r.status,
     paid: r.paid,
     updatedAt: r.updated_at,
-    cliente: r.cliente || null, // só o ADM recebe nome e telefone
+    // Nome e WhatsApp gravados no pedido (ou, em pedidos antigos, os do cadastro)
+    cliente: (r.client_name || r.client_phone || r.cliente)
+      ? { name: r.client_name || r.cliente?.name || '', phone: r.client_phone || r.cliente?.phone || '' }
+      : null,
   };
 }
 
 async function carregarDados() {
   const ehAdmin = sessao.role === 'admin';
+  const temAcesso = Boolean(sessao.id); // visitante que ainda não agendou não tem pedidos nem avisos
   const desde = new Date();
   desde.setDate(desde.getDate() - 60);
+  const vazio = Promise.resolve({ data: [] });
 
   const [profs, servs, appts, avisos, bloqs] = await Promise.all([
     sb.from('professionals').select('*').order('created_at'),
     sb.from('services').select('*').order('created_at'),
     ehAdmin
       ? sb.from('appointments').select('*, cliente:profiles(name, phone)').gte('date', dataISO(desde))
-      : sb.from('appointments').select('*').eq('client_id', sessao.id),
-    ehAdmin
-      ? Promise.resolve({ data: [] })
+      : temAcesso ? sb.from('appointments').select('*').eq('client_id', sessao.id) : vazio,
+    ehAdmin || !temAcesso
+      ? vazio
       : sb.from('notifications').select('*').eq('user_id', sessao.id).order('created_at', { ascending: false }).limit(20),
     ehAdmin
       ? sb.from('blocks').select('*').or(`repeat_daily.eq.true,date.gte.${hojeISO()}`).order('date').order('start_time')
@@ -136,24 +141,42 @@ async function enviarFoto(arquivo) {
 
 /* ---------------- Sessão ---------------- */
 
+// Quem está usando o site:
+// - "visitante": abriu o site e ainda não agendou (não tem acesso nenhum)
+// - "client": já agendou neste aparelho (acesso anônimo) ou tem conta antiga com e-mail
+// - "admin": o Caio, com e-mail e senha
 async function iniciarSessao() {
   const { data: { session } } = await sb.auth.getSession();
-  if (!session) { sessao = null; return; }
-
-  const { data: perfil, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
-  if (error) throw error;
-  sessao = { id: perfil.id, email: session.user.email, name: perfil.name, phone: perfil.phone, role: perfil.role };
+  if (session) {
+    const { data: perfil, error } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
+    if (error) throw error;
+    sessao = {
+      id: session.user.id, email: session.user.email || '',
+      name: perfil?.name || '', phone: perfil?.phone || '', role: perfil?.role || 'client',
+    };
+  } else {
+    sessao = { id: null, email: '', name: '', phone: '', role: 'visitante' };
+  }
   await carregarDados();
-  assinarTempoReal();
+  if (sessao.id) assinarTempoReal();
+}
+
+// No primeiro pedido, cria um acesso anônimo guardado neste aparelho
+// (sem e-mail nem senha), para o cliente ver e cancelar os próprios horários
+async function garantirAcessoCliente() {
+  if (sessao.id) return;
+  const { error } = await sb.auth.signInAnonymously();
+  if (error) throw error;
+  await iniciarSessao();
 }
 
 async function sair() {
   if (canal) { sb.removeChannel(canal); canal = null; }
   await sb.auth.signOut();
-  sessao = null;
   db = { professionals: [], services: [], appointments: [], notifications: [], blocks: [] };
   ocupadosPorDia = {};
-  location.hash = '#/login';
+  await iniciarSessao().catch(() => {});
+  location.hash = '#/home';
   render();
 }
 
@@ -169,6 +192,8 @@ function mensagemDeErro(error) {
   if (/failed to fetch|network/i.test(msg)) return 'Sem conexão com o servidor. Verifique sua internet.';
   if (/bucket not found|photo_url/i.test(msg)) return 'Falta rodar o arquivo supabase/fotos-profissionais.sql no Supabase.';
   if (/exceeded the maximum allowed size|payload too large/i.test(msg)) return 'Essa foto é grande demais. Tente outra.';
+  if (/anonymous sign-ins are disabled/i.test(msg)) return 'O agendamento pelo site está temporariamente indisponível. Fale com a barbearia pelo WhatsApp.';
+  if (/client_name|client_phone/i.test(msg)) return 'Falta rodar o arquivo supabase/sem-login.sql no Supabase.';
   return msg;
 }
 
@@ -319,7 +344,7 @@ async function recarregarEmSegundoPlano() {
     return;
   }
   const rota = rotaAtual();
-  if (['pedidos', 'agenda', 'home', 'conta'].includes(rota)) render();
+  if (['pedidos', 'agenda', 'home', 'meus-horarios'].includes(rota)) render();
   else desenharTopo(sessao, rota);
 }
 
@@ -345,17 +370,17 @@ function desenharTopo(user, rota) {
       ${link('profissionais', 'Profissionais')}
       ${link('servicos', 'Serviços')}
       <button class="link" id="btn-sair">Sair</button>`;
+    document.getElementById('btn-sair').onclick = sair;
   } else {
+    // Cliente: sem login, sem "Sair"
     const naoLidas = db.notifications.filter(n => !n.read).length;
-    document.title = (naoLidas ? `(${naoLidas}) ` : '') + 'Barbearia do Caio';
+    document.title = (naoLidas ? `(${naoLidas}) ` : '') + 'Barbearia do Caio | Agende seu corte online';
     topo.innerHTML = `
       <span class="brand">Barbearia do Caio</span>
       ${link('home', 'Início')}
       ${link('agendar', 'Agendar horário')}
-      ${link('conta', 'Minha conta', badge(naoLidas))}
-      <button class="link" id="btn-sair">Sair</button>`;
+      ${link('meus-horarios', 'Meus horários', badge(naoLidas))}`;
   }
-  document.getElementById('btn-sair').onclick = sair;
 }
 
 /* =========================================================
@@ -398,27 +423,23 @@ function telaErro(error) {
       <div class="card stack">
         <strong>Não foi possível carregar a barbearia.</strong>
         <p class="sub" style="margin:0">${esc(mensagemDeErro(error))}</p>
-        <div class="row">
-          <button class="btn" onclick="location.reload()">Tentar de novo</button>
-          <button class="btn secondary" id="btn-erro-sair">Sair da conta</button>
-        </div>
+        <button class="btn" onclick="location.reload()">Tentar de novo</button>
       </div>
     </div>`;
-  document.getElementById('btn-erro-sair').onclick = sair;
 }
 
-/* ---------- Login ---------- */
+/* ---------- Área do barbeiro (login só do ADM) ---------- */
 function telaLogin() {
   app.innerHTML = `
     <div class="auth">
-      <h1>Barbearia do Caio</h1>
-      <p class="sub">Entre para agendar seu horário</p>
+      <h1>Área do barbeiro</h1>
+      <p class="sub">Acesso exclusivo da barbearia</p>
       <form class="card stack" id="form-login">
         <div class="field"><label for="email">E-mail</label><input id="email" type="email" autocomplete="email" required></div>
         <div class="field"><label for="senha">Senha</label><input id="senha" type="password" autocomplete="current-password" required></div>
         <div class="error" id="erro"></div>
         <button class="btn block">Entrar</button>
-        <p style="text-align:center;margin:12px 0 0">Não tem conta? <a href="#/cadastro">Criar conta</a></p>
+        <p style="text-align:center;margin:12px 0 0"><a href="#/home">Voltar para o site</a></p>
       </form>
     </div>`;
 
@@ -439,71 +460,14 @@ function telaLogin() {
         erro.textContent = mensagemDeErro(err);
         return;
       }
-      location.hash = sessao.role === 'admin' ? '#/pedidos' : '#/home';
-    });
-  };
-}
-
-/* ---------- Cadastro ---------- */
-function telaCadastro() {
-  app.innerHTML = `
-    <div class="auth">
-      <h1>Criar conta</h1>
-      <p class="sub">Leva menos de um minuto</p>
-      <form class="card stack" id="form-cad">
-        <div class="field"><label for="nome">Nome</label><input id="nome" autocomplete="name" required></div>
-        <div class="field"><label for="tel">WhatsApp (com DDD)</label><input id="tel" type="tel" autocomplete="tel" placeholder="(11) 90000-0000" required></div>
-        <div class="field"><label for="email">E-mail</label><input id="email" type="email" autocomplete="email" required></div>
-        <div class="field"><label for="senha">Senha (mín. 6 caracteres)</label><input id="senha" type="password" minlength="6" autocomplete="new-password" required></div>
-        <div class="error" id="erro"></div>
-        <button class="btn block">Criar conta</button>
-        <p style="text-align:center;margin:12px 0 0"><a href="#/login">Já tenho conta</a></p>
-      </form>
-    </div>`;
-
-  const form = document.getElementById('form-cad');
-  form.onsubmit = async e => {
-    e.preventDefault();
-    const erro = document.getElementById('erro');
-    erro.textContent = '';
-    // O telefone é usado para avisar o cliente no WhatsApp: precisa ter DDD
-    if (!linkWhatsApp(document.getElementById('tel').value, '')) {
-      erro.textContent = 'Informe o WhatsApp com DDD, por exemplo (11) 91234-5678.';
-      return;
-    }
-    await comBotaoOcupado(form.querySelector('button'), async () => {
-      const { data, error } = await sb.auth.signUp({
-        email: document.getElementById('email').value.trim(),
-        password: document.getElementById('senha').value,
-        options: {
-          data: {
-            name: document.getElementById('nome').value.trim(),
-            phone: document.getElementById('tel').value.trim(),
-          },
-          emailRedirectTo: location.origin + location.pathname,
-        },
-      });
-      if (error) { erro.textContent = mensagemDeErro(error); return; }
-
-      // Se o Supabase exigir confirmação de e-mail, ainda não há sessão
-      if (!data.session) {
-        app.innerHTML = `
-          <div class="auth">
-            <div class="card stack">
-              <strong>Quase lá! 📩</strong>
-              <p style="margin:0">Enviamos um link de confirmação para <strong>${esc(data.user?.email || '')}</strong>. Abra seu e-mail, confirme e depois faça login.</p>
-              <a class="btn block" href="#/login" style="text-align:center">Ir para o login</a>
-            </div>
-          </div>`;
+      // Contas antigas de cliente não entram aqui: o cliente agenda direto pelo site
+      if (sessao.role !== 'admin') {
+        await sb.auth.signOut();
+        await iniciarSessao().catch(() => {});
+        erro.textContent = 'Esta área é só da barbearia. Para agendar, use "Voltar para o site".';
         return;
       }
-      try {
-        await iniciarSessao();
-      } catch (err) {
-        erro.textContent = mensagemDeErro(err);
-        return;
-      }
-      location.hash = '#/home';
+      location.hash = '#/pedidos';
     });
   };
 }
@@ -524,8 +488,10 @@ function cartaoAppt(a, { paraAdmin = false } = {}) {
       if (!a.paid) {
         acoes = `<button class="btn secondary small" data-acao="pagar" data-id="${a.id}" ${ehHoje ? '' : 'disabled title="O pagamento só pode ser registrado no dia do atendimento"'}>Registrar pagamento</button>`;
       }
-      // Botão para avisar o cliente no WhatsApp (mensagem já escrita)
-      const whats = !jaPassou(a) && linkWhatsApp(a.cliente?.phone, mensagemConfirmacao(a));
+    }
+    // Botão para avisar o cliente no WhatsApp (mensagem já escrita), se aceito ou recusado
+    if (['confirmed', 'rejected'].includes(a.status) && !jaPassou(a)) {
+      const whats = linkWhatsApp(a.cliente?.phone, a.status === 'confirmed' ? mensagemConfirmacao(a) : mensagemRecusa(a));
       if (whats) acoes += `<a class="btn small btn-whats" href="${esc(whats)}" target="_blank" rel="noopener noreferrer">Avisar no WhatsApp</a>`;
     }
   } else if (ATIVOS.includes(a.status) && !jaPassou(a)) {
@@ -539,7 +505,7 @@ function cartaoAppt(a, { paraAdmin = false } = {}) {
       : `<div class="meta">💳 Pagamento ${ehHoje ? '<strong>hoje</strong>, no local' : 'somente no dia do atendimento, no local'}</div>`;
   }
 
-  const cliente = a.cliente ? ` · 👤 ${esc(a.cliente.name)} ${esc(a.cliente.phone)}` : '';
+  const cliente = a.cliente ? ` · 👤 ${esc(a.cliente.name)} ${esc(formatarFone(a.cliente.phone))}` : '';
   const fim = paraHora(paraMin(a.start) + serv.duration);
 
   return `
@@ -566,19 +532,39 @@ function linkWhatsApp(telefone, texto) {
   return `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`;
 }
 
+// "5511912345678" ou "11912345678" → "(11) 91234-5678"
+function formatarFone(telefone) {
+  let n = String(telefone || '').replace(/\D/g, '');
+  if (n.startsWith('55') && n.length >= 12) n = n.slice(2);
+  if (n.length === 11) return `(${n.slice(0, 2)}) ${n.slice(2, 7)}-${n.slice(7)}`;
+  if (n.length === 10) return `(${n.slice(0, 2)}) ${n.slice(2, 6)}-${n.slice(6)}`;
+  return telefone || '';
+}
+
+const primeiroNome = a => (a.cliente?.name || '').trim().split(' ')[0];
+const enderecoDoSite = () => document.querySelector('link[rel=canonical]')?.href || location.origin + location.pathname;
+
 function mensagemConfirmacao(a) {
-  const nome = (a.cliente?.name || '').trim().split(' ')[0];
+  const nome = primeiroNome(a);
   const prof = porId('professionals', a.professionalId)?.name;
   return `Olá${nome ? ', ' + nome : ''}! Seu horário na Barbearia do Caio está confirmado: `
     + `${a.service.name}, ${dataBonita(a.date)}, às ${a.start}${prof ? ', com ' + prof : ''}. `
     + 'O pagamento é feito no dia, direto na barbearia. Até lá!';
 }
 
-// Depois de aceitar: pergunta se o ADM quer avisar o cliente (abre o WhatsApp com a mensagem pronta)
-function oferecerAvisoWhatsApp(a) {
+function mensagemRecusa(a) {
+  const nome = primeiroNome(a);
+  return `Olá${nome ? ', ' + nome : ''}! Infelizmente não conseguimos atender seu pedido de `
+    + `${a.service.name} em ${dataBonita(a.date)}, às ${a.start}. `
+    + `Escolha outro horário pelo site ${enderecoDoSite()} ou responda esta mensagem. Obrigado!`;
+}
+
+// Depois de aceitar ou recusar: pergunta se o ADM quer avisar o cliente (abre o WhatsApp com a mensagem pronta)
+function oferecerAvisoWhatsApp(a, aceito = true) {
   if (!a) return;
-  const nome = (a.cliente?.name || 'o cliente').trim().split(' ')[0];
-  const link = linkWhatsApp(a.cliente?.phone, mensagemConfirmacao(a));
+  const nome = primeiroNome(a) || 'o cliente';
+  const mensagem = aceito ? mensagemConfirmacao(a) : mensagemRecusa(a);
+  const link = linkWhatsApp(a.cliente?.phone, mensagem);
   if (!link) {
     toast(`O telefone de ${nome} não parece um WhatsApp válido. Avise por outro meio.`, true);
     return;
@@ -587,9 +573,9 @@ function oferecerAvisoWhatsApp(a) {
   dialogo.className = 'dialogo';
   dialogo.innerHTML = `
     <form method="dialog" class="stack">
-      <strong>Pedido aceito!</strong>
+      <strong>${aceito ? 'Pedido aceito!' : 'Pedido recusado.'}</strong>
       <p style="margin:0">Avise ${esc(nome)} pelo WhatsApp. A mensagem já vai escrita, é só tocar em enviar.</p>
-      <p class="meta" style="margin:0">${esc(mensagemConfirmacao(a))}</p>
+      <p class="meta" style="margin:0">${esc(mensagem)}</p>
       <div class="row">
         <a class="btn btn-whats" href="${esc(link)}" target="_blank" rel="noopener noreferrer">Avisar no WhatsApp</a>
         <button class="btn secondary">Agora não</button>
@@ -631,24 +617,43 @@ function ligarAcoes() {
         ocupadosPorDia = {};
         await carregarDados();
         render();
-        if (acao === 'aceitar') oferecerAvisoWhatsApp(porId('appointments', id));
+        if (acao === 'aceitar' || acao === 'recusar') oferecerAvisoWhatsApp(porId('appointments', id), acao === 'aceitar');
       });
     };
   });
 }
 
+/* ---------- Nome e WhatsApp do cliente (lembrados neste aparelho) ---------- */
+const CHAVE_CLIENTE = 'barbearia_cliente';
+
+function dadosSalvosCliente() {
+  let salvo = {};
+  try { salvo = JSON.parse(localStorage.getItem(CHAVE_CLIENTE)) || {}; } catch (e) { /* sem armazenamento */ }
+  const ultimo = [...db.appointments].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
+  return {
+    nome: salvo.nome || ultimo?.cliente?.name || sessao?.name || '',
+    whats: salvo.whats || formatarFone(ultimo?.cliente?.phone) || sessao?.phone || '',
+  };
+}
+
+function salvarDadosCliente(nome, whats) {
+  try { localStorage.setItem(CHAVE_CLIENTE, JSON.stringify({ nome, whats })); } catch (e) { /* sem problema */ }
+}
+
 /* ---------- Cliente: Início ---------- */
-function telaHome(user) {
+function telaHome() {
   const proximos = ordenarAppts(db.appointments.filter(a => ATIVOS.includes(a.status) && !jaPassou(a)));
   const servicos = db.services.filter(s => s.active);
+  const nome = dadosSalvosCliente().nome.split(' ')[0];
 
   app.innerHTML = `
-    <h1>Olá, ${esc((user.name || 'cliente').split(' ')[0])}!</h1>
-    <p class="sub">Seu estilo, seu momento. Escolha seu próximo horário.</p>
+    <h1>${nome ? `Olá, ${esc(nome)}!` : 'Bem-vindo!'}</h1>
+    <p class="sub">Seu estilo, seu momento. Agende em poucos toques, sem cadastro.</p>
     <a class="btn" href="#/agendar">Agendar horário</a>
 
-    <h2>Seu próximo horário</h2>
-    ${proximos.length ? cartaoAppt(proximos[0]) : '<div class="card empty">Você não tem horários marcados.</div>'}
+    ${proximos.length ? `
+      <h2>Seu próximo horário</h2>
+      ${cartaoAppt(proximos[0])}` : ''}
 
     <h2>Nossos serviços</h2>
     <div class="grid">
@@ -658,14 +663,18 @@ function telaHome(user) {
           <div class="meta" style="color:var(--muted)">${s.duration} min</div>
           <div style="font-size:18px;margin-top:6px">${dinheiro(s.price)}</div>
         </div>`).join('')}
-    </div>`;
+    </div>
+
+    <p class="rodape"><a href="#/admin">Área do barbeiro</a></p>`;
   ligarAcoes();
 }
 
 /* ---------- Cliente: Agendar ---------- */
-const escolha = { serviceIds: [], professionalId: null, date: null, start: null };
+const escolha = { serviceIds: [], professionalId: null, date: null, start: null, nome: null, whats: null };
 
 function telaAgendar(user) {
+  // Preenche nome e WhatsApp com o que este aparelho já usou antes
+  if (escolha.nome === null || escolha.whats === null) Object.assign(escolha, dadosSalvosCliente());
   const servicos = db.services.filter(s => s.active);
   const profs = db.professionals.filter(p => p.active);
   const dias = proximosDias();
@@ -735,6 +744,17 @@ function telaAgendar(user) {
     <h2>4. Horário</h2>
     ${blocoHorarios}
 
+    <h2>5. Seus dados</h2>
+    <p class="sub">Sem cadastro: a barbearia usa seu WhatsApp para confirmar o horário.</p>
+    <div class="card stack">
+      <div class="field"><label for="cli-nome">Seu nome</label>
+        <input id="cli-nome" autocomplete="name" maxlength="60" placeholder="Como podemos te chamar?" value="${esc(escolha.nome)}">
+      </div>
+      <div class="field"><label for="cli-whats">WhatsApp (com DDD)</label>
+        <input id="cli-whats" type="tel" inputmode="tel" autocomplete="tel" placeholder="(11) 91234-5678" value="${esc(escolha.whats)}">
+      </div>
+    </div>
+
     <h2>Resumo</h2>
     <div class="card summary stack">
       ${pronto
@@ -742,8 +762,13 @@ function telaAgendar(user) {
            <div>${esc(dataBonita(escolha.date))} · <strong>${escolha.start} às ${paraHora(paraMin(escolha.start) + serv.duration)}</strong> (${serv.duration} min)</div>
            <div>Valor: <strong>${dinheiro(serv.price)}</strong> — pago no dia, no local</div>`
         : '<div class="sub" style="margin:0">Complete as etapas acima.</div>'}
+      <div class="error" id="erro-pedido"></div>
       <button class="btn" id="btn-confirmar" ${pronto ? '' : 'disabled'}>Enviar pedido</button>
     </div>`;
+
+  // Guarda o que o cliente digita (a tela é redesenhada a cada escolha)
+  document.getElementById('cli-nome').oninput = e => { escolha.nome = e.target.value; };
+  document.getElementById('cli-whats').oninput = e => { escolha.whats = e.target.value; };
 
   app.querySelectorAll('[data-campo]').forEach(btn => {
     btn.onclick = () => {
@@ -760,38 +785,76 @@ function telaAgendar(user) {
   });
 
   const btnConfirmar = document.getElementById('btn-confirmar');
-  btnConfirmar.onclick = () => comBotaoOcupado(btnConfirmar, async () => {
-    const { error } = await sb.from('appointments').insert({
-      professional_id: escolha.professionalId,
-      service_ids: escolha.serviceIds,
-      date: escolha.date,
-      start_time: escolha.start,
-    });
-    if (error) {
-      toast(mensagemDeErro(error), true);
-      delete ocupadosPorDia[escolha.date];
-      escolha.start = null;
-      telaAgendar(user);
+  btnConfirmar.onclick = () => {
+    const erro = document.getElementById('erro-pedido');
+    const nome = (escolha.nome || '').trim();
+    const whats = escolha.whats || '';
+    erro.textContent = '';
+    if (nome.length < 2) {
+      erro.textContent = 'Digite seu nome na etapa 5.';
+      document.getElementById('cli-nome').focus();
       return;
     }
-    Object.assign(escolha, { serviceIds: [], professionalId: null, date: null, start: null });
-    ocupadosPorDia = {};
-    await carregarDados();
-    toast('Pedido enviado! Você será avisado quando o barbeiro responder.');
-    location.hash = '#/conta';
-  });
+    if (!linkWhatsApp(whats, '')) {
+      erro.textContent = 'Digite seu WhatsApp com DDD, por exemplo (11) 91234-5678.';
+      document.getElementById('cli-whats').focus();
+      return;
+    }
+
+    comBotaoOcupado(btnConfirmar, async () => {
+      try {
+        await garantirAcessoCliente(); // sem login: cria o acesso deste aparelho no primeiro pedido
+      } catch (err) {
+        erro.textContent = mensagemDeErro(err);
+        return;
+      }
+      const { error } = await sb.from('appointments').insert({
+        professional_id: escolha.professionalId,
+        service_ids: escolha.serviceIds,
+        date: escolha.date,
+        start_time: escolha.start,
+        client_name: nome,
+        client_phone: whats,
+      });
+      if (error) {
+        toast(mensagemDeErro(error), true);
+        delete ocupadosPorDia[escolha.date];
+        escolha.start = null;
+        telaAgendar(user);
+        return;
+      }
+      salvarDadosCliente(nome, whats);
+      Object.assign(escolha, { serviceIds: [], professionalId: null, date: null, start: null });
+      ocupadosPorDia = {};
+      await carregarDados();
+      toast('Pedido enviado! A barbearia vai te avisar pelo WhatsApp.');
+      location.hash = '#/meus-horarios';
+    });
+  };
 }
 
-/* ---------- Cliente: Minha conta ---------- */
-function telaConta(user) {
+/* ---------- Cliente: Meus horários ---------- */
+function telaMeusHorarios(user) {
   const meus = db.appointments;
   const futuros = ordenarAppts(meus.filter(a => !jaPassou(a) && a.status !== 'cancelled'));
   const historico = ordenarAppts(meus.filter(a => jaPassou(a) || a.status === 'cancelled')).reverse();
   const avisos = db.notifications.slice(0, 5);
+  const dados = dadosSalvosCliente();
+
+  if (!meus.length) {
+    app.innerHTML = `
+      <h1>Meus horários</h1>
+      <div class="card empty stack">
+        <div>Você ainda não tem horários marcados neste aparelho.</div>
+        <div><a class="btn" href="#/agendar">Agendar horário</a></div>
+      </div>
+      <p class="sub" style="margin-top:16px">Os horários ficam salvos no celular ou computador em que você agendou.</p>`;
+    return;
+  }
 
   app.innerHTML = `
-    <h1>Minha conta</h1>
-    <p class="sub">${esc(user.name)} · ${esc(user.phone)} · ${esc(user.email)}</p>
+    <h1>Meus horários</h1>
+    <p class="sub">${esc(dados.nome)}${dados.whats ? ' · WhatsApp ' + esc(formatarFone(dados.whats)) : ''}</p>
     <a class="btn" href="#/agendar">Agendar horário</a>
 
     ${avisos.length ? `
@@ -1167,7 +1230,7 @@ function telaServicos() {
    Rotas
    ========================================================= */
 
-const ROTAS_CLIENTE = { home: telaHome, agendar: telaAgendar, conta: telaConta };
+const ROTAS_CLIENTE = { home: telaHome, agendar: telaAgendar, 'meus-horarios': telaMeusHorarios };
 const ROTAS_ADMIN = { pedidos: telaPedidos, agenda: telaAgenda, bloqueios: telaBloqueios, profissionais: telaProfissionais, servicos: telaServicos };
 
 const rotaAtual = () => location.hash.replace('#/', '');
@@ -1177,16 +1240,20 @@ function render() {
   const user = sessao;
   const rota = rotaAtual();
 
-  if (!user) {
+  if (!user) return telaCarregando(); // ainda carregando
+
+  // Área do barbeiro: login só do ADM
+  if (rota === 'admin') {
+    if (user.role === 'admin') { location.hash = '#/pedidos'; return; }
     desenharTopo(null);
-    if (rota === 'cadastro') return telaCadastro();
-    if (rota !== 'login') { location.hash = '#/login'; return; }
     return telaLogin();
   }
 
   const rotas = user.role === 'admin' ? ROTAS_ADMIN : ROTAS_CLIENTE;
   if (!rotas[rota]) {
-    location.hash = user.role === 'admin' ? '#/pedidos' : '#/home';
+    // Endereços antigos (#/login, #/cadastro, #/conta) e desconhecidos levam à tela certa
+    const destino = user.role === 'admin' ? '#/pedidos' : rota === 'conta' ? '#/meus-horarios' : '#/home';
+    location.hash = destino;
     return;
   }
   desenharTopo(user, rota);
