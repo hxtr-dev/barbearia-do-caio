@@ -76,7 +76,7 @@ As regras ficam no banco (`supabase/schema.sql`), não no site:
 - `analytics.js`: Google Analytics, carregado só depois que o visitante aceita os cookies (LGPD).
 - `robots.txt`, `sitemap.xml`, `llms.txt`: arquivos para Google e robôs de IA lerem o site.
 - `favicon.svg`: ícone da aba do navegador.
-- `caio.jpeg` / `caio.webp`: imagem de fundo (a WebP é a versão leve).
+- `fundo.jpg` / `fundo.webp`: imagem de fundo (a WebP é a versão leve).
 
 Se o site mudar de endereço (domínio próprio), troque o endereço em `index.html`, `robots.txt`,
 `sitemap.xml` e `llms.txt`.

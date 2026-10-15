@@ -207,10 +207,10 @@ body::before {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background: linear-gradient(rgba(10, 9, 6, .35), rgba(10, 9, 6, .78)), url("caio.jpeg") center 30% / cover no-repeat;
+  background: linear-gradient(rgba(10, 9, 6, .35), rgba(10, 9, 6, .78)), url("fundo.jpg") 28% 30% / cover no-repeat;
   /* Versão WebP (bem mais leve) para os navegadores que suportam */
   background: linear-gradient(rgba(10, 9, 6, .35), rgba(10, 9, 6, .78)),
-              image-set(url("caio.webp") type("image/webp"), url("caio.jpeg") type("image/jpeg")) center 30% / cover no-repeat;
+              image-set(url("fundo.webp") type("image/webp"), url("fundo.jpg") type("image/jpeg")) 28% 30% / cover no-repeat;
 }
 h1, h2, .brand {
   font-family: "Copperplate Gothic Bold", "Copperplate Gothic", Copperplate, "Palatino Linotype", serif;
